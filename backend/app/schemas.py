@@ -62,6 +62,43 @@ class NotebookRead(BaseModel):
     updated_at: datetime
 
 
+class ChatRequest(BaseModel):
+    question: str
+    # If omitted, the backend uses all checked + ready sources in the notebook.
+    source_ids: list[str] | None = None
+
+
+class CitationOut(BaseModel):
+    display_index: int
+    source_id: str
+    chunk_id: str | None = None
+    # Denormalized source fields so the frontend renders chips + drawer with no extra calls.
+    source_title: str
+    source_authors: str | None = None
+    source_venue: str | None = None
+    source_kind: str
+    page: int | None = None
+    section: str | None = None
+    char_offset_start: int
+    char_offset_end: int
+    snippet: str
+
+
+class ChatResponse(BaseModel):
+    message_id: str
+    answer_markdown: str
+    grounded: bool
+    citations: list[CitationOut]
+
+
+class MessageRead(BaseModel):
+    id: str
+    role: str
+    text: str
+    created_at: datetime
+    citations: list[CitationOut] = []
+
+
 class HealthRead(BaseModel):
     status: str
     provider: str

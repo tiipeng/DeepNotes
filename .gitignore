@@ -14,5 +14,12 @@ backend/test_doc.pdf
 **/node_modules/
 **/.next/
 
+# graphify analysis output
+graphify-out/
+raw/
+
+# Claude Code local config
+.claude/
+
 # OS
 .DS_Store

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import init_db
-from .routers import notebooks
+from .routers import notebooks, sources
 from .schemas import HealthRead
 
 
@@ -26,6 +26,7 @@ app.add_middleware(
 )
 
 app.include_router(notebooks.router)
+app.include_router(sources.router)
 
 
 @app.get("/health", response_model=HealthRead)

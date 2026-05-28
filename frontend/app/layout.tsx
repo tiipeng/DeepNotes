@@ -8,6 +8,9 @@ const serif = Newsreader({
   variable: "--font-newsreader",
   display: "swap",
   style: ["normal", "italic"],
+  axes: ["opsz"], // optical sizing — matches the original's Newsreader:opsz,wght@6..72
+  adjustFontFallback: false, // Newsreader has no metrics in next/font's DB; skip (silences warning)
+  fallback: ["Source Serif 4", "Georgia", "serif"],
 });
 const mono = JetBrains_Mono({
   subsets: ["latin"],

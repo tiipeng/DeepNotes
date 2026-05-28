@@ -55,6 +55,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: "ss01", "cv11";
+  font-optical-sizing: auto;
 }
 
 .dn-mono { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; color: var(--muted); }

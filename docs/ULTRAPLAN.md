@@ -207,6 +207,12 @@ click  → frontend hits /sources/{id}/passage with the citation's offsets
 
 > **Phase 0 result (✅ validated):** SentenceSplitter nodes round-trip perfectly (`md[start:end] == node.text`). **Caveat:** `CitationQueryEngine` sub-splits a retrieved node into citation chunks `[1][2]…` whose `start_char_idx` still points at the *parent* node, not the sub-chunk. So for highlighting, **locate each citation chunk's text by substring search in the source markdown** (exact match hit 100% in the spike; keep a whitespace-normalized fallback). Don't trust the citation node's `start_char_idx` for the precise span.
 
+> **Locked-in offset resolution (confirmed) — `locate_span(cited_text, parsed_markdown, parent_chunk)`:**
+> 1. **Exact substring** match in `parsed_markdown` → use that range.
+> 2. **Whitespace-normalized** match (collapse runs of whitespace on both sides, map back to original offsets) → use that range. Prevents silent highlight failures on whitespace differences.
+> 3. **Fallback to the parent chunk's full span** (`chunk.char_offset_start/end`) → highlight the whole retrieved chunk rather than showing nothing.
+> `CitationOut` is **denormalized** (carries `source_title/authors/venue/kind`) so the frontend renders chips + drawer with zero extra round-trips; the `citations` table stays normalized via `source_id`/`chunk_id`.
+
 ---
 
 ## 7. Repository structure

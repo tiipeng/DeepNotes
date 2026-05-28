@@ -35,6 +35,19 @@ class SourceRead(BaseModel):
     created_at: datetime
 
 
+class SourcePatch(BaseModel):
+    checked: bool | None = None
+
+
+class SourceContent(BaseModel):
+    id: str
+    title: str
+    kind: str
+    pages: int | None = None
+    parsed_markdown: str
+    sections: list[str] = []
+
+
 class NotebookRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

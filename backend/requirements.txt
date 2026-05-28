@@ -16,6 +16,10 @@ llama-index-core
 llama-index-llms-google-genai
 llama-index-embeddings-google-genai
 
+# Vector store
+chromadb
+llama-index-vector-stores-chroma
+
 # Misc
 python-dotenv
 

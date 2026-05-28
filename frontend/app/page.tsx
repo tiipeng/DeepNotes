@@ -1,13 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { createNotebook, getHealth, listNotebooks } from "@/lib/api";
-import type { Health, Notebook } from "@/lib/types";
+import { createNotebook, listNotebooks } from "@/lib/api";
+import type { Notebook } from "@/lib/types";
+import { TopBar } from "@/components/TopBar";
 
 export default function Dashboard() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
-  const [health, setHealth] = useState<Health | null>(null);
-  const [healthError, setHealthError] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -19,7 +18,6 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    getHealth().then(setHealth).catch(() => setHealthError(true));
     refresh();
   }, [refresh]);
 
@@ -37,36 +35,7 @@ export default function Dashboard() {
 
   return (
     <div className="dn-app">
-      <header className="dn-topbar">
-        <div className="dn-brand">
-          <span className="dn-brand-mark" aria-hidden>
-            <span className="dn-brand-mark-i" />
-            <span className="dn-brand-mark-i" />
-          </span>
-          <span className="dn-brand-word">DeepNotes</span>
-        </div>
-        <div className="dn-top-mid">
-          <div className="dn-search">
-            <input placeholder="Search across all notebooks…" />
-            <span className="dn-kbd">⌘K</span>
-          </div>
-        </div>
-        <div className="dn-top-right">
-          <span className="dn-health" title="Backend status">
-            <span
-              className={`dn-health-dot ${
-                healthError ? "is-down" : health ? "is-ok" : ""
-              }`}
-            />
-            {healthError
-              ? "api offline"
-              : health
-                ? `${health.provider} · ${health.llm_model}`
-                : "connecting…"}
-          </span>
-          <button className="dn-top-link">Settings</button>
-        </div>
-      </header>
+      <TopBar />
 
       <main className="dn-main">
         <div className="dn-screen">

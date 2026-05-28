@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..ingest.parse import parse_document, parse_plain_text
 from ..ingest.pipeline import ingest_source
-from ..models import Notebook, Source
-from ..schemas import SourceContent, SourcePatch, SourceRead
+from ..models import Chunk, Notebook, Source
+from ..schemas import PassageRead, SourceContent, SourcePatch, SourceRead
 from ..stores.chroma import delete_source as chroma_delete_source
 
 router = APIRouter(tags=["sources"])
@@ -129,6 +129,45 @@ def delete_source(source_id: str, db: Session = Depends(get_db)):
     chroma_delete_source(source_id)  # remove vectors before the row
     db.delete(s)
     db.commit()
+
+
+_CTX = 700  # chars of context shown on each side of the highlight
+
+
+@router.get("/sources/{source_id}/passage", response_model=PassageRead)
+def source_passage(source_id: str, start: int, end: int, db: Session = Depends(get_db)):
+    """Slice parsed_markdown into pre / highlight / post for the citation drawer."""
+    s = _get_source(db, source_id)
+    md = s.parsed_markdown
+    start = max(0, min(start, len(md)))
+    end = max(start, min(end, len(md)))
+
+    pre = md[max(0, start - _CTX):start]
+    if start - _CTX > 0:  # avoid starting mid-word
+        sp = pre.find(" ")
+        if sp != -1:
+            pre = pre[sp + 1:]
+    post = md[end:end + _CTX]
+
+    # page/section from the chunk that contains the highlight start
+    chunk = (
+        db.query(Chunk)
+        .filter(Chunk.source_id == source_id, Chunk.char_offset_start <= start)
+        .order_by(Chunk.char_offset_start.desc())
+        .first()
+    )
+    return PassageRead(
+        source_id=s.id,
+        title=s.title,
+        kind=s.kind,
+        authors=s.authors,
+        venue=s.venue,
+        page=chunk.page if chunk else s.pages,
+        section=chunk.section if chunk else None,
+        pre=pre,
+        highlight=md[start:end],
+        post=post,
+    )
 
 
 @router.get("/sources/{source_id}/content", response_model=SourceContent)

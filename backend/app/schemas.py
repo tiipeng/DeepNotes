@@ -48,6 +48,19 @@ class SourceContent(BaseModel):
     sections: list[str] = []
 
 
+class PassageRead(BaseModel):
+    source_id: str
+    title: str
+    kind: str
+    authors: str | None = None
+    venue: str | None = None
+    page: int | None = None
+    section: str | None = None
+    pre: str
+    highlight: str
+    post: str
+
+
 class NotebookRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

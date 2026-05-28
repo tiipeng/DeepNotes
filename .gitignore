@@ -6,9 +6,9 @@
 **/.venv/
 **/__pycache__/
 *.pyc
-backend/deepnotes.db
-backend/chroma/
-backend/tables.duckdb
+backend/*.db
+backend/chroma*/
+backend/tables*.duckdb
 backend/test_doc.pdf
 backend/sales.xlsx
 

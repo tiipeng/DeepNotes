@@ -24,7 +24,7 @@ class OllamaProvider(ModelProvider):
                 "llama-index-llms-ollama llama-index-embeddings-ollama"
             ) from e
         self._llm = Ollama(
-            model=s.ollama_llm_model, base_url=s.ollama_base_url, request_timeout=120.0
+            model=s.ollama_llm_model, base_url=s.ollama_base_url, request_timeout=300.0
         )
         self._embed = OllamaEmbedding(
             model_name=s.ollama_embed_model, base_url=s.ollama_base_url

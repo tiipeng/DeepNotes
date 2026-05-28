@@ -28,9 +28,9 @@ openpyxl
 # Misc
 python-dotenv
 
-# Local sovereignty mode (optional — only if LLM_PROVIDER=ollama):
-# llama-index-llms-ollama
-# llama-index-embeddings-ollama
+# Local sovereignty mode (LLM_PROVIDER=ollama) — small clients, no cloud calls:
+llama-index-llms-ollama
+llama-index-embeddings-ollama
 
 # Phase 0 spike helper (test PDF generation):
 # fpdf2

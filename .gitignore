@@ -8,7 +8,9 @@
 *.pyc
 backend/deepnotes.db
 backend/chroma/
+backend/tables.duckdb
 backend/test_doc.pdf
+backend/sales.xlsx
 
 # Node / Next
 **/node_modules/

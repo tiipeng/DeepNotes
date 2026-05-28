@@ -42,12 +42,21 @@ export interface Citation {
   snippet: string;
 }
 
+export interface TableResult {
+  source_title: string;
+  sql: string;
+  columns: string[];
+  rows: (string | number | boolean | null)[][];
+  truncated: boolean;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
   text: string;
   created_at: string;
   citations: Citation[];
+  table_result: TableResult | null;
 }
 
 export interface ChatResponse {
@@ -55,6 +64,7 @@ export interface ChatResponse {
   answer_markdown: string;
   grounded: boolean;
   citations: Citation[];
+  table_result: TableResult | null;
 }
 
 export interface Passage {

@@ -10,7 +10,14 @@ import {
   setSourceChecked,
   uploadSource,
 } from "@/lib/api";
-import type { Citation, Message, Notebook, Passage, Source } from "@/lib/types";
+import type {
+  Citation,
+  Message,
+  Notebook,
+  Passage,
+  Source,
+  TableResult,
+} from "@/lib/types";
 import { TopBar } from "@/components/TopBar";
 import {
   IconAttach,
@@ -365,19 +372,26 @@ function AssistantMessage({
 }) {
   const byId = new Map(m.citations.map((c) => [c.display_index, c]));
   const grounded = m.citations.length > 0;
+  const table = m.table_result;
+
+  const byline = table
+    ? `Computed from ${table.source_title}`
+    : grounded
+      ? `Grounded in ${new Set(m.citations.map((c) => c.source_id)).size} source(s)`
+      : "No grounded answer";
 
   return (
     <div className="dn-msg-assistant">
       <div className="dn-msg-byline">
         <span className="dn-assistant-mark" aria-hidden><IconSparkle size={12} /></span>
-        <span className="dn-msg-byline-text">
-          {grounded ? `Grounded in ${new Set(m.citations.map((c) => c.source_id)).size} source(s)` : "No grounded answer"}
-        </span>
+        <span className="dn-msg-byline-text">{byline}</span>
       </div>
 
-      <div className={`dn-answer ${grounded ? "" : "dn-answer-notfound"}`}>
+      <div className={`dn-answer ${grounded || table ? "" : "dn-answer-notfound"}`}>
         {renderAnswer(m.text, byId, openCite, onCite)}
       </div>
+
+      {table && <TableCard table={table} />}
 
       {grounded && (
         <div className="dn-cited-row">
@@ -403,7 +417,7 @@ function AssistantMessage({
         </div>
       )}
 
-      {grounded && (
+      {(grounded || table) && (
         <div className="dn-msg-tools">
           <button className="dn-tool"><IconCopy size={13} /> Copy</button>
           <button className="dn-tool"><IconQuote size={13} /> Save as note</button>
@@ -444,6 +458,33 @@ function renderAnswer(
     }
     return <span key={i}>{part}</span>;
   });
+}
+
+function TableCard({ table }: { table: TableResult }) {
+  const fmt = (v: string | number | boolean | null) =>
+    v === null ? "" : typeof v === "number" ? v.toLocaleString("en-US") : String(v);
+  return (
+    <div className="dn-table-card">
+      <div className="dn-table-label">Computed from spreadsheet · {table.source_title}</div>
+      <div className="dn-table-scroll">
+        <table className="dn-data-table">
+          <thead>
+            <tr>{table.columns.map((c) => <th key={c}>{c}</th>)}</tr>
+          </thead>
+          <tbody>
+            {table.rows.map((r, i) => (
+              <tr key={i}>{r.map((c, j) => <td key={j}>{fmt(c)}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {table.truncated && <div className="dn-table-more">…more rows not shown</div>}
+      <details className="dn-sql">
+        <summary>Query</summary>
+        <pre>{table.sql}</pre>
+      </details>
+    </div>
+  );
 }
 
 /* ---------------- Studio ---------------- */

@@ -20,6 +20,11 @@ llama-index-embeddings-google-genai
 chromadb
 llama-index-vector-stores-chroma
 
+# Spreadsheet reasoning (XLSX differentiator)
+duckdb
+pandas
+openpyxl
+
 # Misc
 python-dotenv
 

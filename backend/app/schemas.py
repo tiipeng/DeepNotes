@@ -5,6 +5,7 @@ alongside their endpoints in Phases 3/5 so the wire contract never drifts from t
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -97,11 +98,20 @@ class CitationOut(BaseModel):
     snippet: str
 
 
+class TableResult(BaseModel):
+    source_title: str
+    sql: str
+    columns: list[str]
+    rows: list[list[Any]]
+    truncated: bool = False
+
+
 class ChatResponse(BaseModel):
     message_id: str
     answer_markdown: str
     grounded: bool
     citations: list[CitationOut]
+    table_result: TableResult | None = None
 
 
 class MessageRead(BaseModel):
@@ -110,6 +120,7 @@ class MessageRead(BaseModel):
     text: str
     created_at: datetime
     citations: list[CitationOut] = []
+    table_result: TableResult | None = None
 
 
 class HealthRead(BaseModel):

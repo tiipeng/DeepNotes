@@ -1,10 +1,13 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Citation, Message, Notebook, Source
 from ..rag.engine import answer_question
-from ..schemas import ChatRequest, ChatResponse, CitationOut, MessageRead
+from ..schemas import ChatRequest, ChatResponse, CitationOut, MessageRead, TableResult
+from ..spreadsheet.engine import answer_with_tables
 
 router = APIRouter(tags=["chat"])
 
@@ -38,14 +41,34 @@ def _citation_out(c: Citation, db: Session) -> CitationOut:
 def chat(notebook_id: str, payload: ChatRequest, db: Session = Depends(get_db)):
     nb = _get_notebook(db, notebook_id)
 
+    # Spreadsheet reasoning first: if the notebook has XLSX tables and the question
+    # is answerable via SQL, compute it. Otherwise fall back to grounded RAG.
+    table = answer_with_tables(db, notebook_id, payload.question)
+
     if payload.source_ids is not None:
         source_ids = payload.source_ids
     else:
         source_ids = [s.id for s in nb.sources if s.checked and s.status == "ready"]
 
-    result = answer_question(db, source_ids, payload.question)
-
     db.add(Message(notebook_id=notebook_id, role="user", text=payload.question))
+
+    if table:
+        table_out = TableResult(
+            source_title=table["source_title"], sql=table["sql"],
+            columns=table["columns"], rows=table["rows"], truncated=table["truncated"],
+        )
+        assistant = Message(
+            notebook_id=notebook_id, role="assistant", text=table["answer"],
+            table_json=table_out.model_dump_json(),
+        )
+        db.add(assistant)
+        db.commit()
+        return ChatResponse(
+            message_id=assistant.id, answer_markdown=table["answer"],
+            grounded=True, citations=[], table_result=table_out,
+        )
+
+    result = answer_question(db, source_ids, payload.question)
     assistant = Message(notebook_id=notebook_id, role="assistant", text=result["answer"])
     db.add(assistant)
     db.flush()  # assign assistant.id before linking citations
@@ -83,9 +106,13 @@ def list_messages(notebook_id: str, db: Session = Depends(get_db)):
             (_citation_out(c, db) for c in m.citations),
             key=lambda x: x.display_index,
         )
+        table_result = (
+            TableResult(**json.loads(m.table_json)) if m.table_json else None
+        )
         out.append(
             MessageRead(
-                id=m.id, role=m.role, text=m.text, created_at=m.created_at, citations=cites
+                id=m.id, role=m.role, text=m.text, created_at=m.created_at,
+                citations=cites, table_result=table_result,
             )
         )
     return out

@@ -10,6 +10,7 @@ from ..ingest.parse import parse_document, parse_plain_text, resolve_at
 from ..ingest.pipeline import ingest_source
 from ..models import Chunk, Notebook, Source
 from ..schemas import PassageRead, SourceContent, SourcePatch, SourceRead
+from ..spreadsheet.store import drop_tables, ingest_tables, parse_xlsx
 from ..stores.chroma import delete_source as chroma_delete_source
 
 router = APIRouter(tags=["sources"])
@@ -88,6 +89,8 @@ async def add_source(
     try:
         if plain_text is not None:
             parsed = parse_plain_text(plain_text)
+        elif kind == "xlsx":
+            parsed = parse_xlsx(tmp_path)
         else:
             parsed = parse_document(tmp_path or url)
 
@@ -96,6 +99,8 @@ async def add_source(
             raise HTTPException(400, f"Would exceed the {MAX_PAGES_TOTAL}-page total budget")
 
         ingest_source(db, source, parsed)
+        if kind == "xlsx":
+            ingest_tables(db, source, tmp_path)  # structured tables for SQL reasoning
     except HTTPException:
         source.status = "error"
         db.commit()
@@ -126,7 +131,8 @@ def patch_source(source_id: str, payload: SourcePatch, db: Session = Depends(get
 @router.delete("/sources/{source_id}", status_code=204)
 def delete_source(source_id: str, db: Session = Depends(get_db)):
     s = _get_source(db, source_id)
-    chroma_delete_source(source_id)  # remove vectors before the row
+    chroma_delete_source(source_id)  # remove vectors
+    drop_tables(source_id)  # remove DuckDB tables (if any)
     db.delete(s)
     db.commit()
 

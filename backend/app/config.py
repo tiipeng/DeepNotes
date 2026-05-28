@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./deepnotes.db"
     chroma_dir: str = "./chroma"
+    tables_path: str = "./tables.duckdb"  # DuckDB file for XLSX spreadsheet reasoning
     cors_origins: str = "http://localhost:3000"
 
 

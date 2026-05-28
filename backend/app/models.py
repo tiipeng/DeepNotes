@@ -96,6 +96,8 @@ class Message(Base):
     thread_id: Mapped[str] = mapped_column(String, default="default")
     role: Mapped[str] = mapped_column(String)  # user | assistant
     text: Mapped[str] = mapped_column(Text)
+    # Spreadsheet-reasoning result (sql/columns/rows), JSON, when answered via tables.
+    table_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     notebook: Mapped["Notebook"] = relationship(back_populates="messages")

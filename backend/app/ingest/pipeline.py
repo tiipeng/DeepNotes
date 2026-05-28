@@ -5,6 +5,7 @@ both in Chroma (as node metadata, for retrieval) and SQLite (for the citation dr
 Chunk id == Chroma node id, so the two stay linked.
 """
 
+import json
 import uuid
 
 from llama_index.core import Document, StorageContext, VectorStoreIndex
@@ -76,6 +77,7 @@ def ingest_source(db: Session, source: Source, parsed: ParsedDoc) -> int:
 
     db.add_all(chunk_rows)
     source.parsed_markdown = parsed.markdown
+    source.page_map = json.dumps([[s.start, s.end, s.page] for s in parsed.spans])
     source.char_count = len(parsed.markdown)
     if parsed.num_pages:
         source.pages = parsed.num_pages

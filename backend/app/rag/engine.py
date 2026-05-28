@@ -15,6 +15,7 @@ from llama_index.core.vector_stores import (
 )
 from sqlalchemy.orm import Session
 
+from ..ingest.parse import page_for_offset
 from ..models import Chunk, Source
 from ..providers import get_provider
 from ..stores.chroma import get_vector_store
@@ -81,7 +82,7 @@ def _build_engine(source_ids: list[str], top_k: int = 8) -> CitationQueryEngine:
         llm=provider.llm(),
         similarity_top_k=top_k,
         filters=filters,
-        citation_chunk_size=64,  # ~1-2 sentences per cited unit (tighter highlights)
+        citation_chunk_size=48,  # ~1 sentence per cited unit (tight, no heading graze)
         citation_chunk_overlap=0,
         citation_qa_template=_QA_TEMPLATE,
         citation_refine_template=_REFINE_TEMPLATE,
@@ -110,8 +111,12 @@ def _build_citations(db: Session, answer: str, source_nodes) -> list[dict]:
             n, sid, method, start, end, end - start, len(cited_text),
         )
 
-        page = meta.get("page")
-        page = None if page in (None, -1, "-1") else int(page)
+        # Resolve page from the cited sentence's offset (chunk-size independent),
+        # falling back to the chunk's metadata page if no page_map.
+        page = page_for_offset(source.page_map, start)
+        if page is None:
+            meta_page = meta.get("page")
+            page = None if meta_page in (None, -1, "-1") else int(meta_page)
         section = meta.get("section") or None
         chunk = (
             db.query(Chunk)
@@ -138,6 +143,23 @@ def _build_citations(db: Session, answer: str, source_nodes) -> list[dict]:
     return out
 
 
+def _renumber(answer: str, citations: list[dict]) -> tuple[str, list[dict]]:
+    """Remap the engine's internal citation numbers (e.g. [7][29][112]) to clean
+    sequential [1][2][3] in order of first appearance, in both the answer text and
+    the citation records."""
+    order: list[int] = []
+    for m in _CITE_RE.finditer(answer):
+        n = int(m.group(1))
+        if n not in order:
+            order.append(n)
+    remap = {old: i + 1 for i, old in enumerate(order)}
+    new_answer = _CITE_RE.sub(lambda m: f"[{remap.get(int(m.group(1)), m.group(1))}]", answer)
+    for c in citations:
+        c["display_index"] = remap.get(c["display_index"], c["display_index"])
+    citations.sort(key=lambda c: c["display_index"])
+    return new_answer, citations
+
+
 def answer_question(db: Session, source_ids: list[str], question: str) -> dict:
     if not source_ids:
         return {"answer": NOT_FOUND, "grounded": False, "citations": []}
@@ -150,4 +172,6 @@ def answer_question(db: Session, source_ids: list[str], question: str) -> dict:
     # An answer with no resolvable citations isn't truly grounded.
     if grounded and not citations:
         grounded = False
+    if grounded:
+        answer, citations = _renumber(answer, citations)
     return {"answer": answer, "grounded": grounded, "citations": citations}

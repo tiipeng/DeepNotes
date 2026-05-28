@@ -60,6 +60,9 @@ class Source(Base):
     checked: Mapped[bool] = mapped_column(Boolean, default=True)  # included in chat
     char_count: Mapped[int] = mapped_column(Integer, default=0)
     parsed_markdown: Mapped[str] = mapped_column(Text, default="")  # reading-pane content
+    # JSON [[start, end, page], ...] mapping char offsets -> page, so any citation's
+    # page is resolved from its exact offset (accurate regardless of chunk size).
+    page_map: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     notebook: Mapped["Notebook"] = relationship(back_populates="sources")

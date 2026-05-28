@@ -107,3 +107,22 @@ def span_at(offset: int, spans: list[Span]) -> Span | None:
         if s.start <= offset < s.end:
             return s
     return spans[-1] if spans else None
+
+
+def page_for_offset(page_map_json: str, offset: int) -> int | None:
+    """Resolve the page for an arbitrary char offset from a stored page_map JSON
+    ([[start, end, page], ...]). Used at citation time so the page reflects the
+    cited sentence's offset, not the parent chunk's start page."""
+    import json
+
+    try:
+        spans = json.loads(page_map_json or "[]")
+    except (ValueError, TypeError):
+        return None
+    nearest = None
+    for start, end, page in spans:
+        if start <= offset < end:
+            return page
+        if start <= offset:
+            nearest = page
+    return nearest

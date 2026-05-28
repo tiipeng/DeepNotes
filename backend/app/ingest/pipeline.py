@@ -77,7 +77,7 @@ def ingest_source(db: Session, source: Source, parsed: ParsedDoc) -> int:
 
     db.add_all(chunk_rows)
     source.parsed_markdown = parsed.markdown
-    source.page_map = json.dumps([[s.start, s.end, s.page] for s in parsed.spans])
+    source.page_map = json.dumps([[s.start, s.end, s.page, s.section] for s in parsed.spans])
     source.char_count = len(parsed.markdown)
     if parsed.num_pages:
         source.pages = parsed.num_pages

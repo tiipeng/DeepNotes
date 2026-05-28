@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..ingest.parse import page_for_offset, parse_document, parse_plain_text
+from ..ingest.parse import parse_document, parse_plain_text, resolve_at
 from ..ingest.pipeline import ingest_source
 from ..models import Chunk, Notebook, Source
 from ..schemas import PassageRead, SourceContent, SourcePatch, SourceRead
@@ -149,16 +149,18 @@ def source_passage(source_id: str, start: int, end: int, db: Session = Depends(g
             pre = pre[sp + 1:]
     post = md[end:end + _CTX]
 
-    # page from the highlight's exact offset; section from the nearest chunk.
+    # page + section from the highlight's exact offset (chunk fallback).
     chunk = (
         db.query(Chunk)
         .filter(Chunk.source_id == source_id, Chunk.char_offset_start <= start)
         .order_by(Chunk.char_offset_start.desc())
         .first()
     )
-    page = page_for_offset(s.page_map, start)
+    page, section = resolve_at(s.page_map, start)
     if page is None:
         page = chunk.page if chunk else s.pages
+    if section is None:
+        section = chunk.section if chunk else None
     return PassageRead(
         source_id=s.id,
         title=s.title,
@@ -166,7 +168,7 @@ def source_passage(source_id: str, start: int, end: int, db: Session = Depends(g
         authors=s.authors,
         venue=s.venue,
         page=page,
-        section=chunk.section if chunk else None,
+        section=section,
         pre=pre,
         highlight=md[start:end],
         post=post,

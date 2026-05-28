@@ -109,20 +109,23 @@ def span_at(offset: int, spans: list[Span]) -> Span | None:
     return spans[-1] if spans else None
 
 
-def page_for_offset(page_map_json: str, offset: int) -> int | None:
-    """Resolve the page for an arbitrary char offset from a stored page_map JSON
-    ([[start, end, page], ...]). Used at citation time so the page reflects the
-    cited sentence's offset, not the parent chunk's start page."""
+def resolve_at(page_map_json: str, offset: int) -> tuple[int | None, str | None]:
+    """Resolve (page, section) for an arbitrary char offset from a stored page_map
+    JSON ([[start, end, page, section], ...]). Used at citation time so page AND
+    section reflect the cited sentence's exact offset, not the parent chunk's start.
+    Tolerates the older 3-tuple format (section omitted)."""
     import json
 
     try:
         spans = json.loads(page_map_json or "[]")
     except (ValueError, TypeError):
-        return None
-    nearest = None
-    for start, end, page in spans:
+        return None, None
+    nearest: tuple[int | None, str | None] = (None, None)
+    for row in spans:
+        start, end, page = row[0], row[1], row[2]
+        section = row[3] if len(row) > 3 else None
         if start <= offset < end:
-            return page
+            return page, section
         if start <= offset:
-            nearest = page
+            nearest = (page, section)
     return nearest

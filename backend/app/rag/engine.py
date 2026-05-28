@@ -15,7 +15,7 @@ from llama_index.core.vector_stores import (
 )
 from sqlalchemy.orm import Session
 
-from ..ingest.parse import page_for_offset
+from ..ingest.parse import resolve_at
 from ..models import Chunk, Source
 from ..providers import get_provider
 from ..stores.chroma import get_vector_store
@@ -111,13 +111,14 @@ def _build_citations(db: Session, answer: str, source_nodes) -> list[dict]:
             n, sid, method, start, end, end - start, len(cited_text),
         )
 
-        # Resolve page from the cited sentence's offset (chunk-size independent),
-        # falling back to the chunk's metadata page if no page_map.
-        page = page_for_offset(source.page_map, start)
+        # Resolve page + section from the cited sentence's offset (chunk-size
+        # independent), falling back to the chunk's metadata if no page_map.
+        page, section = resolve_at(source.page_map, start)
         if page is None:
             meta_page = meta.get("page")
             page = None if meta_page in (None, -1, "-1") else int(meta_page)
-        section = meta.get("section") or None
+        if section is None:
+            section = meta.get("section") or None
         chunk = (
             db.query(Chunk)
             .filter_by(source_id=sid, char_offset_start=p_start)

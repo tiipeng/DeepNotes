@@ -2,6 +2,7 @@
 with inline [n] markers, mapped to denormalized CitationOut records.
 """
 
+import logging
 import re
 
 from llama_index.core import PromptTemplate, Settings, VectorStoreIndex
@@ -47,6 +48,14 @@ _REFINE_TEMPLATE = PromptTemplate(
 _CITE_RE = re.compile(r"\[(\d+)\]")
 _SOURCE_PREFIX = re.compile(r"^\s*Source\s+\d+:\s*", re.IGNORECASE)
 
+log = logging.getLogger("deepnotes.citations")
+if not log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
+    log.propagate = False
+
 
 def _strip_prefix(text: str) -> str:
     return _SOURCE_PREFIX.sub("", text).strip()
@@ -72,7 +81,8 @@ def _build_engine(source_ids: list[str], top_k: int = 8) -> CitationQueryEngine:
         llm=provider.llm(),
         similarity_top_k=top_k,
         filters=filters,
-        citation_chunk_size=128,  # smaller = tighter, sentence-level highlights
+        citation_chunk_size=64,  # ~1-2 sentences per cited unit (tighter highlights)
+        citation_chunk_overlap=0,
         citation_qa_template=_QA_TEMPLATE,
         citation_refine_template=_REFINE_TEMPLATE,
     )
@@ -94,7 +104,11 @@ def _build_citations(db: Session, answer: str, source_nodes) -> list[dict]:
         cited_text = _strip_prefix(node.get_content())
         p_start = int(meta.get("char_offset_start", 0))
         p_end = int(meta.get("char_offset_end", 0))
-        start, end = locate_span(cited_text, source.parsed_markdown, p_start, p_end)
+        start, end, method = locate_span(cited_text, source.parsed_markdown, p_start, p_end)
+        log.info(
+            "locate_span [%d] source=%s method=%s span=%d..%d (%d chars) cited=%d chars",
+            n, sid, method, start, end, end - start, len(cited_text),
+        )
 
         page = meta.get("page")
         page = None if page in (None, -1, "-1") else int(page)

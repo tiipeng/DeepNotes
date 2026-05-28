@@ -311,7 +311,10 @@ body {
 .dn-studio-empty { font-size: 12.5px; color: var(--muted); padding: 4px 0 16px; line-height: 1.5; }
 
 /* ---------- Citation drawer ---------- */
-.dn-cd-scrim { position: fixed; inset: 0; background: rgba(20, 18, 14, 0.18); backdrop-filter: blur(2px); opacity: 0; pointer-events: none; transition: opacity 0.2s ease; z-index: 40; }
+/* Plain semi-transparent overlay — no backdrop-filter (blur is GPU-costly on older
+   Intel Macs and made the open/close animation janky). Slightly darker to keep
+   foreground/background separation without the blur. */
+.dn-cd-scrim { position: fixed; inset: 0; background: rgba(20, 18, 14, 0.32); opacity: 0; pointer-events: none; transition: opacity 0.2s ease; z-index: 40; }
 .dn-cd-scrim.is-open { opacity: 1; pointer-events: auto; }
 .dn-cd { position: fixed; top: 0; right: 0; bottom: 0; width: 620px; max-width: 92vw; background: var(--surface); border-left: 1px solid var(--border); box-shadow: var(--shadow-drawer); transform: translateX(100%); transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); display: flex; flex-direction: column; z-index: 41; }
 .dn-cd.is-open { transform: translateX(0); }

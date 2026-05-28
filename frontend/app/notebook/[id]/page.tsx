@@ -492,11 +492,14 @@ function CitationDrawer({
   const open = !!cite;
   const highlightRef = useRef<HTMLElement>(null);
 
+  // Center the highlight as soon as the drawer opens (the highlight text comes from
+  // cite.snippet, so it's present immediately), and again once pre/post context
+  // loads and shifts its position.
   useEffect(() => {
-    if (passage && highlightRef.current) {
+    if (cite && highlightRef.current) {
       highlightRef.current.scrollIntoView({ block: "center", behavior: "auto" });
     }
-  }, [passage]);
+  }, [cite, passage]);
 
   return (
     <>
@@ -543,26 +546,23 @@ function CitationDrawer({
             </div>
 
             <div className="dn-cd-pages">
-              {!passage ? (
-                <div className="dn-loading">Loading passage…</div>
-              ) : (
-                <div className="dn-cd-page is-current">
-                  <div className="dn-cd-gutter">
-                    <span className="dn-mono">{cite.page ?? "—"}</span>
-                    <span className="dn-cd-gutter-mark" aria-hidden />
-                  </div>
-                  <div className="dn-cd-prose">
-                    {cite.section && <h4 className="dn-cd-h">{cite.section}</h4>}
-                    {passage.pre && <p className="dn-cd-faint">…{cleanLine(passage.pre)}</p>}
-                    <p>
-                      <mark className="dn-cd-highlight" ref={highlightRef}>
-                        {cleanLine(passage.highlight)}
-                      </mark>
-                    </p>
-                    {passage.post && <p className="dn-cd-faint">{cleanLine(passage.post)}…</p>}
-                  </div>
+              <div className="dn-cd-page is-current">
+                <div className="dn-cd-gutter">
+                  <span className="dn-mono">{cite.page ?? "—"}</span>
+                  <span className="dn-cd-gutter-mark" aria-hidden />
                 </div>
-              )}
+                <div className="dn-cd-prose">
+                  {cite.section && <h4 className="dn-cd-h">{cite.section}</h4>}
+                  {/* Context loads async; the highlight is shown instantly from cite.snippet. */}
+                  {passage?.pre && <p className="dn-cd-faint">…{cleanLine(passage.pre)}</p>}
+                  <p>
+                    <mark className="dn-cd-highlight" ref={highlightRef}>
+                      {cleanLine(cite.snippet)}
+                    </mark>
+                  </p>
+                  {passage?.post && <p className="dn-cd-faint">{cleanLine(passage.post)}…</p>}
+                </div>
+              </div>
             </div>
 
             <footer className="dn-cd-foot">

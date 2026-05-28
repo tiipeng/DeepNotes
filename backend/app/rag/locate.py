@@ -36,13 +36,15 @@ def locate_span(
     markdown: str,
     parent_start: int,
     parent_end: int,
-) -> tuple[int, int]:
+) -> tuple[int, int, str]:
+    """Return (start, end, method) where method is the resolution path taken:
+    'exact' | 'normalized' | 'parent_fallback' | 'empty'."""
     cited = cited_text.strip()
     if cited:
         # 1. exact substring
         i = markdown.find(cited)
         if i != -1:
-            return i, i + len(cited)
+            return i, i + len(cited), "exact"
 
         # 2. whitespace-normalized
         norm_md, idx_map = _norm_map(markdown)
@@ -52,7 +54,9 @@ def locate_span(
             if p != -1:
                 start = idx_map[p]
                 end = idx_map[p + len(norm_cited) - 1] + 1
-                return start, end
+                return start, end, "normalized"
 
-    # 3. fallback: parent chunk span
-    return parent_start, parent_end
+        # 3. fallback: parent chunk span
+        return parent_start, parent_end, "parent_fallback"
+
+    return parent_start, parent_end, "empty"

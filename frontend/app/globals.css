@@ -1,0 +1,181 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   DeepNotes design tokens — ported verbatim from the design bundle
+   (deepnotes/project/styles.css). Warm-neutral foundation, forest accent.
+   Component classes for the notebook/chat/citation-drawer are added in Phase 5.
+   ============================================================ */
+:root {
+  --bg:           #FAF8F4;
+  --bg-2:         #F4F0E8;
+  --bg-3:         #ECE6D8;
+  --surface:      #FFFFFF;
+  --surface-2:    #FBFAF6;
+  --border:       #E6E0D2;
+  --border-2:     #DAD2BE;
+  --border-3:     #C9BFA6;
+
+  --ink:          #1A1815;
+  --ink-2:        #3A352D;
+  --muted:        #6B6862;
+  --muted-2:      #94908A;
+  --faint:        #B6B2A8;
+
+  --accent:       #1F4D3F;
+  --accent-ink:   #163A2F;
+  --accent-soft:  rgba(31, 77, 63, 0.08);
+  --accent-soft-2:rgba(31, 77, 63, 0.16);
+  --highlight:    #FFE6A8;
+  --highlight-2:  #F4D77A;
+
+  --font-serif:   var(--font-newsreader), "Source Serif 4", Georgia, serif;
+  --font-sans:    var(--font-geist-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:    var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+
+  --shadow-card:  0 1px 0 rgba(20, 18, 14, 0.02), 0 1px 2px rgba(20, 18, 14, 0.04);
+  --shadow-pop:   0 12px 32px -8px rgba(20, 18, 14, 0.12), 0 2px 6px rgba(20, 18, 14, 0.06);
+  --shadow-drawer:-12px 0 48px -12px rgba(20, 18, 14, 0.18);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; min-height: 100%; }
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.dn-mono { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; color: var(--muted); }
+.dn-dot { display: inline-block; width: 2px; height: 2px; border-radius: 50%; background: var(--faint); margin: 0 6px; vertical-align: middle; }
+
+/* ---------- App shell ---------- */
+.dn-app { display: flex; flex-direction: column; min-height: 100vh; background: var(--bg); }
+.dn-main { flex: 1; width: 100%; max-width: 1320px; margin: 0 auto; padding: 24px 28px 64px; }
+
+/* ---------- Top bar ---------- */
+.dn-topbar {
+  display: grid; grid-template-columns: 280px 1fr 280px; align-items: center; gap: 20px;
+  padding: 14px 28px; background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.dn-brand { display: flex; align-items: baseline; gap: 10px; }
+.dn-brand-mark {
+  display: inline-flex; align-items: center; gap: 2px; padding: 4px 6px;
+  border: 1px solid var(--ink); border-radius: 4px; background: var(--ink);
+}
+.dn-brand-mark-i { display: block; width: 4px; height: 11px; background: var(--bg); }
+.dn-brand-mark-i:last-child { background: var(--accent); height: 7px; align-self: flex-end; }
+.dn-brand-word {
+  font-family: var(--font-serif); font-weight: 600; font-size: 19px;
+  letter-spacing: -0.01em; color: var(--ink);
+}
+.dn-top-mid { display: flex; justify-content: center; }
+.dn-top-right { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+.dn-top-link {
+  padding: 6px 10px; font-size: 13px; color: var(--muted); border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.dn-top-link:hover { color: var(--ink); background: var(--bg-2); }
+
+/* Health pill (Phase 1 scaffold signal) */
+.dn-health { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+.dn-health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.dn-health-dot.is-ok { background: var(--accent); }
+.dn-health-dot.is-down { background: #B85C38; }
+
+/* Search */
+.dn-search {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px;
+  border-radius: var(--r-md); border: 1px solid var(--border); background: var(--surface);
+  color: var(--muted); min-width: 460px; transition: border-color 0.15s;
+}
+.dn-search:focus-within { border-color: var(--border-3); }
+.dn-search input { flex: 1; border: none; background: transparent; font-size: 13px; color: var(--ink); min-width: 0; outline: none; }
+.dn-search input::placeholder { color: var(--muted-2); }
+.dn-kbd {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+  background: var(--bg-2); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);
+}
+
+/* Buttons */
+.dn-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px;
+  border-radius: var(--r-md); font-size: 13px; font-weight: 500;
+  transition: background 0.15s, border-color 0.15s, color 0.15s; cursor: pointer;
+}
+.dn-btn-primary { background: var(--accent); color: #fff; border: 1px solid var(--accent-ink); }
+.dn-btn-primary:hover { background: var(--accent-ink); }
+.dn-btn-ghost { border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); }
+.dn-btn-ghost:hover { border-color: var(--border-3); background: var(--surface-2); }
+.dn-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  border-radius: var(--r-md); color: var(--muted); transition: background 0.15s, color 0.15s; cursor: pointer;
+}
+.dn-icon-btn:hover { background: var(--bg-2); color: var(--ink); }
+
+/* ---------- Dashboard ---------- */
+.dn-screen { padding-top: 8px; }
+.dn-dash-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 24px 0 20px; }
+.dn-display { font-family: var(--font-serif); font-weight: 500; font-size: 34px; letter-spacing: -0.015em; margin: 0 0 6px; color: var(--ink); }
+.dn-subtle { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+.dn-dash-filters { display: flex; align-items: center; gap: 6px; margin-bottom: 22px; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+.dn-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px;
+  font-size: 12.5px; color: var(--muted); border: 1px solid transparent;
+  transition: color 0.15s, background 0.15s, border-color 0.15s; cursor: pointer;
+}
+.dn-chip:hover { color: var(--ink); }
+.dn-chip.is-active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-soft-2); }
+.dn-chip-count { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-2); background: var(--bg-2); padding: 1px 5px; border-radius: 4px; }
+.dn-chip.is-active .dn-chip-count { background: var(--accent-soft-2); color: var(--accent); }
+.dn-dash-spacer { flex: 1; }
+
+/* Card grid */
+.dn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.dn-card {
+  text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+  overflow: hidden; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  display: flex; flex-direction: column; box-shadow: var(--shadow-card); cursor: pointer;
+}
+.dn-card:hover { transform: translateY(-1px); border-color: var(--border-3); box-shadow: var(--shadow-pop); }
+.dn-cover { height: 124px; position: relative; overflow: hidden; }
+.dn-cover::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    radial-gradient(120% 80% at 100% 100%, rgba(255,255,255,0.18), transparent 60%),
+    repeating-linear-gradient(135deg, rgba(255,255,255,0.06) 0 1px, transparent 1px 14px);
+  pointer-events: none;
+}
+.dn-cover-glyph { position: absolute; left: 16px; top: 12px; font-size: 56px; line-height: 1; color: rgba(255, 255, 255, 0.78); font-weight: 500; letter-spacing: -0.02em; font-family: var(--font-serif); }
+.dn-cover-marks { position: absolute; right: 14px; bottom: 14px; display: flex; gap: 4px; }
+.dn-cover-marks span { display: block; width: 14px; height: 3px; background: rgba(255,255,255,0.55); border-radius: 2px; }
+.dn-cover-marks span:nth-child(2) { width: 22px; }
+.dn-cover-marks span:nth-child(3) { width: 8px; }
+.dn-card-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.dn-card-title { font-family: var(--font-serif); font-size: 18px; font-weight: 500; line-height: 1.25; letter-spacing: -0.01em; color: var(--ink); }
+.dn-card-snippet { font-size: 12.5px; color: var(--muted); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dn-card-meta { margin-top: auto; font-size: 11.5px; color: var(--muted-2); display: flex; align-items: center; letter-spacing: 0.01em; }
+.dn-card-new {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 8px;
+  padding: 24px; min-height: 230px; background: transparent; border: 1px dashed var(--border-3);
+  box-shadow: none; color: var(--ink-2);
+}
+.dn-card-new:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); transform: none; }
+.dn-card-new-mark { width: 36px; height: 36px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border-2); display: inline-flex; align-items: center; justify-content: center; color: var(--ink); }
+.dn-card-new:hover .dn-card-new-mark { color: var(--accent); border-color: var(--accent-soft-2); }
+.dn-card-new-label { font-family: var(--font-serif); font-size: 19px; font-weight: 500; letter-spacing: -0.01em; }
+.dn-card-new-sub { font-size: 12.5px; color: var(--muted); }
+
+.dn-empty-note { color: var(--muted); font-size: 13.5px; padding: 40px 0; text-align: center; grid-column: 1 / -1; }

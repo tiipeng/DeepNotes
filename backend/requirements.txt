@@ -1,0 +1,27 @@
+# DeepNotes backend — top-level dependencies (Python 3.12).
+# Install:  uv venv --python 3.12 .venv && source .venv/bin/activate && uv pip install -r requirements.txt
+
+# Web
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic-settings
+
+# Persistence
+sqlalchemy
+
+# Parsing + RAG (the OSS heavy-lifting)
+docling
+llama-index-core
+llama-index-llms-google-genai
+llama-index-embeddings-google-genai
+
+# Misc
+python-dotenv
+
+# Local sovereignty mode (optional — only if LLM_PROVIDER=ollama):
+# llama-index-llms-ollama
+# llama-index-embeddings-ollama
+
+# Phase 0 spike helper (test PDF generation):
+# fpdf2

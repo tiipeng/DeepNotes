@@ -150,6 +150,7 @@ function SettingsModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
   const [provider, setProvider] = useState("gemini");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [geminiKey, setGeminiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -179,13 +180,13 @@ function SettingsModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
 
   const keySaved =
     (provider === "openrouter" && s?.has_openrouter_key) ||
-    (provider === "openai_compatible" && s?.has_openai_compatible_key) ||
-    (provider === "gemini" && s?.has_gemini_key);
+    (provider === "openai_compatible" && s?.has_openai_compatible_key);
 
   const save = async () => {
     setSaving(true);
     setError(null);
     const patch: Record<string, string> = { chat_provider: provider, chat_model: model.trim() };
+    if (geminiKey.trim()) patch.gemini_api_key = geminiKey.trim();
     if (provider === "openrouter" && apiKey.trim()) patch.openrouter_api_key = apiKey.trim();
     if (provider === "openai_compatible") {
       patch.openai_compatible_base_url = baseUrl.trim();
@@ -206,13 +207,34 @@ function SettingsModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
       <div className="dn-modal-scrim" onClick={onClose} aria-hidden />
       <div className="dn-modal" role="dialog" aria-label="Settings">
         <div className="dn-modal-head">
-          <h2 className="dn-modal-title">Chat model</h2>
+          <h2 className="dn-modal-title">Models &amp; API keys</h2>
           <button className="dn-icon-btn" onClick={onClose} title="Close">✕</button>
         </div>
+
+        <label className="dn-field">
+          <span className="dn-field-label">
+            Gemini API key {s?.has_gemini_key && <span className="dn-field-hint">✓ saved — leave blank to keep</span>}
+          </span>
+          <input
+            className="dn-input"
+            type="password"
+            placeholder={s?.has_gemini_key ? "•••••••• (stored)" : "paste your Gemini key"}
+            value={geminiKey}
+            onChange={(e) => setGeminiKey(e.target.value)}
+            autoComplete="off"
+          />
+          <span className="dn-modal-note">
+            Powers embeddings (always) and Gemini chat. Get one free at{" "}
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="dn-banner-link">aistudio.google.com/apikey</a>.
+          </span>
+        </label>
+
+        <div className="dn-modal-divider" />
+
         <p className="dn-modal-sub">
-          Choose the model that generates answers — bring your own key. Embeddings stay pinned to{" "}
-          <strong>{s?.embedding_provider ?? "gemini"}</strong>, so changing this never affects your
-          existing sources or citations.
+          Choose the model that generates answers. Embeddings stay pinned to{" "}
+          <strong>{s?.embedding_provider ?? "gemini"}</strong>, so changing the chat model never
+          affects your existing sources or citations.
         </p>
 
         <label className="dn-field">

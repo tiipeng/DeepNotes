@@ -108,7 +108,9 @@ Each message is classified (a cheap LLM call, with a greeting fast-path) and rou
 - **Bring your own chat model** — choose the model that generates answers (Google Gemini,
   OpenRouter's 200+ models, any OpenAI-compatible endpoint, or local Ollama) and paste your
   own key in Settings. Embeddings stay pinned to one model, so switching the chat model never
-  invalidates your vector store or citations.
+  invalidates your vector store or citations. The **Gemini API key itself is editable in
+  Settings** too (it powers embeddings + Gemini chat) — no `.env` edit or restart needed; a
+  key change is safe because it swaps the account, not the embedding model.
 
 **Workspace**
 - **Multi-file upload** — add several files at once, or attach a file straight from the chat box;
@@ -211,7 +213,8 @@ mixed in one collection. (You can keep Gemini for embeddings and only swap the *
 `CHAT_PROVIDER` / Settings, which never requires a fresh store.)
 
 ### Troubleshooting
-- **`GEMINI_API_KEY is not set`** — copy `backend/.env.example` to `backend/.env` and add your key.
+- **`GEMINI_API_KEY is not set`** — copy `backend/.env.example` to `backend/.env` and add your key,
+  or paste it in-app via **Settings → Gemini API key** (no restart needed).
 - **Frontend can't reach the backend / CORS errors** — set `NEXT_PUBLIC_API_URL` (frontend
   `.env.local`) to the backend URL, and add the frontend's origin to `CORS_ORIGINS` in
   `backend/.env`. This matters when you open the app on a **LAN/Tailscale IP** rather than

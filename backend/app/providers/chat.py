@@ -20,9 +20,10 @@ def _build(provider: str, model: str, cfg: dict):
     if provider == "gemini":
         from llama_index.llms.google_genai import GoogleGenAI
 
-        if not s.gemini_api_key:
-            raise ValueError("Gemini API key is not set (GEMINI_API_KEY in backend/.env).")
-        return GoogleGenAI(model=model or s.gemini_llm_model, api_key=s.gemini_api_key)
+        key = cfg.get("gemini_api_key") or s.gemini_api_key  # runtime override or .env
+        if not key:
+            raise ValueError("Gemini API key is not set. Add it in Settings.")
+        return GoogleGenAI(model=model or s.gemini_llm_model, api_key=key)
 
     if provider == "openrouter":
         from llama_index.llms.openai_like import OpenAILike

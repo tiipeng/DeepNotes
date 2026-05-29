@@ -184,6 +184,7 @@ class SettingsRead(BaseModel):
 class SettingsUpdate(BaseModel):
     chat_provider: str | None = None
     chat_model: str | None = None
+    gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
     openrouter_base_url: str | None = None
     openai_compatible_base_url: str | None = None

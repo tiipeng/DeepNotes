@@ -514,6 +514,7 @@ body {
 select.dn-input { cursor: pointer; }
 .dn-modal-note { font-size: 11.5px; color: var(--muted-2); line-height: 1.5; margin: 4px 0 0; }
 .dn-modal-error { font-size: 12.5px; color: #B85C38; margin: 8px 0 0; }
+.dn-modal-divider { height: 1px; background: var(--border); margin: 16px 0; }
 .dn-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 .dn-btn-danger { background: #B85C38; color: #fff; border: 1px solid #9f4a2b; }
 .dn-btn-danger:hover { background: #9f4a2b; }

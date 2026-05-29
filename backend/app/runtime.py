@@ -12,10 +12,13 @@ from .config import get_settings
 from .db import SessionLocal
 from .models import AppSetting
 
-# Only these keys may be overridden at runtime (no embedding settings here, by design).
+# Keys overridable at runtime (from the Settings UI). gemini_api_key is included because it
+# powers embeddings AND Gemini chat; changing it only swaps the account/key, not the embedding
+# MODEL, so the existing vector store stays valid.
 _KEYS = (
     "chat_provider",
     "chat_model",
+    "gemini_api_key",
     "openrouter_api_key",
     "openrouter_base_url",
     "openai_compatible_base_url",
@@ -53,6 +56,11 @@ def chat_config() -> dict:
     return _cache
 
 
+def gemini_key() -> str:
+    """Effective Gemini API key — runtime override (Settings UI) or the .env value."""
+    return chat_config().get("gemini_api_key") or ""
+
+
 def update_chat_config(patch: dict) -> dict:
     """Persist a runtime override (only known keys) and refresh the cache."""
     global _cache
@@ -76,4 +84,13 @@ def update_chat_config(patch: dict) -> dict:
     finally:
         db.close()
     _cache = None  # force reload on next read
+    # The embedding provider is cached and built with the Gemini key; rebuild it so a
+    # key change takes effect for embeddings (lazy import avoids a circular import).
+    if "gemini_api_key" in clean:
+        try:
+            from .providers.factory import get_provider
+
+            get_provider.cache_clear()
+        except Exception:
+            pass
     return chat_config()

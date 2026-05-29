@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .db import init_db
 from .routers import chat, notebooks, notes, search as search_router, settings as settings_router, sources
-from .runtime import chat_config
+from .runtime import chat_config, gemini_key
 from .schemas import HealthRead
 
 
@@ -49,5 +49,5 @@ def health():
         provider=provider,  # the active CHAT provider
         llm_model=model or provider,
         embed_model=s.gemini_embed_model if s.llm_provider == "gemini" else s.ollama_embed_model,
-        provider_ready=bool(s.gemini_api_key) if s.llm_provider == "gemini" else True,
+        provider_ready=bool(gemini_key() or s.gemini_api_key) if s.llm_provider == "gemini" else True,
     )

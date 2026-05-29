@@ -134,14 +134,22 @@ Each message is classified (a cheap LLM call, with a greeting fast-path) and rou
 
 ---
 
-## 3. Running it locally
+## 3. Installation
+
+DeepNotes is two services — a FastAPI backend and a Next.js frontend — run from one repo.
 
 ### Prerequisites
-- **Python 3.12**, **Node 18+** with **pnpm**
+- **Python 3.12**, **Node 18+** with **pnpm** (`npm i -g pnpm`)
 - A **Gemini API key** (free tier) — <https://aistudio.google.com/apikey>.
   ([`uv`](https://github.com/astral-sh/uv) recommended for the Python env.)
 - No system packages required: OCR (RapidOCR/onnxruntime), audio decoding (PyAV), and Whisper
   (CTranslate2) are pip-installed; models download on first use.
+
+### Get the code
+```bash
+git clone https://github.com/tiipeng/DeepNotes.git
+cd DeepNotes
+```
 
 ### Backend (FastAPI, port 8000)
 ```bash
@@ -177,12 +185,42 @@ echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
 pnpm dev                                      # http://localhost:3000
 ```
 
+### Verify it works
+1. Open <http://localhost:3000> → **New notebook**.
+2. **Add a source** (a PDF or paste a web URL); wait for it to flip from *processing* to *ready*.
+3. Ask a question → you should get a streamed answer with clickable `⟦n⟧` citations.
+
 ### First-run notes
 - The **first PDF parse** downloads Docling's layout models (one-time).
 - The **first scanned PDF** downloads RapidOCR models; the **first audio file** downloads the
   Whisper model (`base`, ~140 MB).
 - On Apple Silicon the parser runs on CPU (MPS is deliberately avoided — it lacks the float64 the
   layout model needs); on a CUDA box it uses the GPU automatically.
+
+### Optional: fully-local / sovereign mode (Ollama)
+Run generation **and** embeddings locally with no external calls:
+```bash
+ollama serve                       # in a separate terminal
+ollama pull llama3.1               # chat model
+ollama pull nomic-embed-text       # embedding model
+```
+Then in `backend/.env` set `LLM_PROVIDER=ollama`. Because this changes the *embedding* model,
+use a **fresh** vector store / DB (e.g. `CHROMA_DIR=./chroma_ollama`,
+`DATABASE_URL=sqlite:///./deepnotes_ollama.db`) — embedding spaces of different models can't be
+mixed in one collection. (You can keep Gemini for embeddings and only swap the *chat* model via
+`CHAT_PROVIDER` / Settings, which never requires a fresh store.)
+
+### Troubleshooting
+- **`GEMINI_API_KEY is not set`** — copy `backend/.env.example` to `backend/.env` and add your key.
+- **Frontend can't reach the backend / CORS errors** — set `NEXT_PUBLIC_API_URL` (frontend
+  `.env.local`) to the backend URL, and add the frontend's origin to `CORS_ORIGINS` in
+  `backend/.env`. This matters when you open the app on a **LAN/Tailscale IP** rather than
+  `localhost` (e.g. `NEXT_PUBLIC_API_URL=http://100.x.x.x:8000` and
+  `CORS_ORIGINS=http://100.x.x.x:3000`).
+- **Port already in use** — change `--port` on uvicorn and point `NEXT_PUBLIC_API_URL` at it.
+- **First answer or upload is slow** — that's the one-time model download (Docling / OCR / Whisper).
+- **Rate-limit errors on heavy use** — the Gemini free tier is limited; slow down or switch the
+  chat model in Settings.
 
 ---
 

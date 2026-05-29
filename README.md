@@ -71,6 +71,10 @@ Each message is classified (a cheap LLM call, with a greeting fast-path) and rou
 - **Threads** — multiple conversations per notebook, isolated and switchable.
 - **Answers follow the question's language** (e.g. a German question gets a German answer);
   citations and source content are unchanged.
+- **Bring your own chat model** — choose the model that generates answers (Google Gemini,
+  OpenRouter's 200+ models, any OpenAI-compatible endpoint, or local Ollama) and paste your
+  own key in Settings. Embeddings stay pinned to one model, so switching the chat model never
+  invalidates your vector store or citations.
 
 ---
 
@@ -116,6 +120,9 @@ Health check: `curl localhost:8000/health`
 | `GEMINI_API_KEY` | **required** when provider is gemini | — |
 | `GEMINI_LLM_MODEL` / `GEMINI_EMBED_MODEL` | model names | `gemini-2.5-flash` / `gemini-embedding-001` |
 | `OLLAMA_BASE_URL` / `OLLAMA_LLM_MODEL` / `OLLAMA_EMBED_MODEL` | used only when provider is ollama | `http://localhost:11434` / `llama3.1` / `nomic-embed-text` |
+| `CHAT_PROVIDER` / `CHAT_MODEL` | chat (generation) model — `gemini` / `openrouter` / `openai_compatible` / `ollama` (also settable in-app via Settings) | `gemini` / *(provider default)* |
+| `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` | for `CHAT_PROVIDER=openrouter` | — / `https://openrouter.ai/api/v1` |
+| `OPENAI_COMPATIBLE_BASE_URL` / `OPENAI_COMPATIBLE_API_KEY` | for `CHAT_PROVIDER=openai_compatible` (OpenAI, vLLM, your own endpoint) | — |
 | `DATABASE_URL` | SQLite metadata DB | `sqlite:///./deepnotes.db` |
 | `CHROMA_DIR` | Chroma vector store dir | `./chroma` |
 | `TABLES_PATH` | DuckDB file for XLSX tables | `./tables.duckdb` |
@@ -216,7 +223,11 @@ A small provider interface returns LlamaIndex-compatible LLM + embedding objects
 spreadsheet layers are identical regardless of backend. `LLM_PROVIDER=gemini` (default) uses
 hosted Gemini; `LLM_PROVIDER=ollama` routes everything — generation **and** embeddings — to a
 local Ollama daemon for fully-local operation (requires Ollama running with the configured models
-pulled).
+pulled). The **chat (generation) model is selected independently** of embeddings via
+`CHAT_PROVIDER`/`CHAT_MODEL` (or the in-app Settings panel) — Gemini, OpenRouter, any
+OpenAI-compatible endpoint, or Ollama, with the user's own key. Embeddings stay pinned to
+`LLM_PROVIDER` on purpose: the vector store is a single fixed-dimension collection, so swapping
+the *embedding* model would invalidate every stored vector — only the chat model is hot-swappable.
 
 ### Key tables (high level)
 `notebooks` · `sources` · `chunks` · `messages` · `citations` · `notes` · `notebook_summaries`

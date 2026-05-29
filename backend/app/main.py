@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import init_db
-from .routers import chat, notebooks, notes, settings as settings_router, sources
+from .routers import chat, notebooks, notes, search as search_router, settings as settings_router, sources
 from .runtime import chat_config
 from .schemas import HealthRead
 
@@ -31,6 +31,7 @@ app.include_router(sources.router)
 app.include_router(chat.router)
 app.include_router(notes.router)
 app.include_router(settings_router.router)
+app.include_router(search_router.router)
 
 
 @app.get("/health", response_model=HealthRead)

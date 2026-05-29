@@ -159,6 +159,13 @@ class NotebookSummaryRead(BaseModel):
     ready: bool  # whether the notebook has any ready sources to ground a summary
 
 
+class SearchHit(BaseModel):
+    notebook_id: str
+    notebook_title: str
+    kind: str  # "notebook" | source kind (pdf/xlsx/url/audio/…)
+    label: str  # the matched title
+
+
 class SettingsRead(BaseModel):
     chat_provider: str
     chat_model: str

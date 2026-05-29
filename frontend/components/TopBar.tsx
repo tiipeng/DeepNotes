@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { getHealth, getSettings, updateSettings } from "@/lib/api";
-import type { ChatSettings, Health } from "@/lib/types";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { getHealth, getSettings, searchAll, updateSettings } from "@/lib/api";
+import type { ChatSettings, Health, SearchHit } from "@/lib/types";
 
 const PROVIDER_LABEL: Record<string, string> = {
   gemini: "Google Gemini",
@@ -22,10 +23,22 @@ export function TopBar() {
   const [health, setHealth] = useState<Health | null>(null);
   const [err, setErr] = useState(false);
   const [open, setOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const loadHealth = () => getHealth().then(setHealth).catch(() => setErr(true));
   useEffect(() => {
     loadHealth();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   return (
@@ -38,10 +51,10 @@ export function TopBar() {
         <span className="dn-brand-word">DeepNotes</span>
       </Link>
       <div className="dn-top-mid">
-        <div className="dn-search">
-          <input placeholder="Search across all notebooks…" />
+        <button className="dn-search" onClick={() => setPaletteOpen(true)} aria-label="Search">
+          <span className="dn-search-placeholder">Search across all notebooks…</span>
           <span className="dn-kbd">⌘K</span>
-        </div>
+        </button>
       </div>
       <div className="dn-top-right">
         <span className="dn-health" title="Active chat model">
@@ -59,7 +72,76 @@ export function TopBar() {
           }}
         />
       )}
+      {paletteOpen && <SearchPalette onClose={() => setPaletteOpen(false)} />}
     </header>
+  );
+}
+
+function SearchPalette({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [loading, setLoading] = useState(false);
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (timer.current) window.clearTimeout(timer.current);
+    const term = q.trim();
+    if (!term) {
+      setHits([]);
+      return;
+    }
+    setLoading(true);
+    timer.current = window.setTimeout(() => {
+      searchAll(term)
+        .then(setHits)
+        .catch(() => setHits([]))
+        .finally(() => setLoading(false));
+    }, 180);
+    return () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    };
+  }, [q]);
+
+  const go = (hit: SearchHit) => {
+    router.push(`/notebook/${hit.notebook_id}`);
+    onClose();
+  };
+
+  return (
+    <>
+      <div className="dn-modal-scrim" onClick={onClose} aria-hidden />
+      <div className="dn-palette" role="dialog" aria-label="Search">
+        <input
+          className="dn-palette-input"
+          placeholder="Search notebooks and sources…"
+          value={q}
+          autoFocus
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && hits[0]) go(hits[0]);
+          }}
+        />
+        <div className="dn-palette-results">
+          {q.trim() && !loading && hits.length === 0 && (
+            <div className="dn-palette-empty">No matches.</div>
+          )}
+          {hits.map((h, i) => (
+            <button key={`${h.notebook_id}-${i}`} className="dn-palette-item" onClick={() => go(h)}>
+              <span className="dn-palette-kind">{h.kind === "notebook" ? "Notebook" : h.kind.toUpperCase()}</span>
+              <span className="dn-palette-label">{h.label}</span>
+              {h.kind !== "notebook" && <span className="dn-palette-in">in {h.notebook_title}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 

@@ -104,6 +104,13 @@ export interface NotebookOverview {
   ready: boolean;
 }
 
+export interface SearchHit {
+  notebook_id: string;
+  notebook_title: string;
+  kind: string;
+  label: string;
+}
+
 export interface ChatSettings {
   chat_provider: string;
   chat_model: string;

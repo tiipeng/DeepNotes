@@ -8,6 +8,7 @@ import type {
   Notebook,
   NotebookOverview,
   Passage,
+  SearchHit,
   Source,
   TableResult,
   Thread,
@@ -27,6 +28,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const getHealth = () => req<Health>("/health");
+export const searchAll = (q: string) =>
+  req<SearchHit[]>(`/search?q=${encodeURIComponent(q)}`);
 export const getSettings = () => req<ChatSettings>("/settings");
 export const updateSettings = (patch: Record<string, string>) =>
   req<ChatSettings>("/settings", { method: "PUT", body: JSON.stringify(patch) });

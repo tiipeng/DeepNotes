@@ -36,6 +36,18 @@ Message: {q}
 Label:"""
 
 
+def _for_classify(q: str, budget: int = 1400) -> str:
+    """A slice the classifier can judge intent from. The real question usually sits at
+    the END of a long message (after pasted context / preamble), so keep both the head
+    and the tail rather than a blind first-N-chars cut."""
+    q = q.strip()
+    if len(q) <= budget:
+        return q
+    head = budget // 3
+    tail = budget - head
+    return f"{q[:head]} […] {q[-tail:]}"
+
+
 def classify_intent(question: str, has_sources: bool) -> str:
     q = question.strip()
     if not q:
@@ -43,7 +55,7 @@ def classify_intent(question: str, has_sources: bool) -> str:
     if _GREETING.match(q):
         return "conversational"
     try:
-        raw = get_provider().llm().complete(_INTENT_PROMPT.format(q=q[:500])).text
+        raw = get_provider().llm().complete(_INTENT_PROMPT.format(q=_for_classify(q))).text
     except Exception:
         return "factual"  # safe default: strict grounded path
     label = raw.strip().lower().split()[0].strip(".:") if raw.strip() else "factual"

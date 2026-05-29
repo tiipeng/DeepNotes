@@ -41,7 +41,9 @@ Return a JSON object with two fields:
 Rules:
 - Use ONLY these tables/columns. Double-quote all identifiers (e.g. "Revenue").
 - SELECT/WITH only. No INSERT/UPDATE/DELETE/DDL.
-- If the question CANNOT be answered from these tables, return {{"sql": null}}.
+- If the question asks for ANY number/value/aggregate computable from these columns — even
+  as one PART of a larger or comparative question — compute that part. Only return
+  {{"sql": null}} if the question is not about this tabular data at all.
 
 Respond with ONLY a JSON object: {{"sql": "<query>", "evidence_sql": "<query or null>"}}.
 

@@ -59,6 +59,17 @@ _REFINE_TEMPLATE = PromptTemplate(
     "Refined Answer: "
 )
 
+_COMBINED_TEMPLATE = PromptTemplate(
+    "Answer the question using the sources below, each labeled 'Source N:'. Source 1 is a "
+    "figure computed from the user's spreadsheet; the others are document excerpts. Use "
+    "ONLY this information, combine the spreadsheet figure with the documents as the "
+    "question requires, and cite key claims with a single [n] (sparingly, most relevant "
+    "source only). Do not use outside knowledge.\n\n"
+    "Sources:\n{context_str}\n\n"
+    "Question: {query_str}\n"
+    "Answer: "
+)
+
 _CITE_RE = re.compile(r"\[(\d+)\]")
 _SOURCE_PREFIX = re.compile(r"^\s*Source\s+\d+:\s*", re.IGNORECASE)
 
@@ -321,6 +332,50 @@ def stream_answer(db: Session, source_ids: list[str], question: str, mode: str =
         else:
             answer, citations = _renumber(answer, citations)
     yield ("done", {"answer": answer, "grounded": grounded, "citations": citations})
+
+
+def stream_combined(db: Session, rag_source_ids: list[str], question: str, table: dict):
+    """Merge spreadsheet evidence (a computed figure) with RAG prose into ONE grounded
+    answer. The table result is injected as 'Source 1' (cited via its row citation);
+    document chunks follow as Source 2.. So a mixed-notebook question like 'compare the
+    West total with what the paper says about X' answers and cites BOTH source types."""
+    rag_chunks = _retrieve_citation_chunks(rag_source_ids, question, top_k=8) if rag_source_ids else []
+    table_text = _DISP_COMPLETE.sub("", table["answer"]).strip()
+    table_cite = table["citations"][0] if table.get("citations") else None
+
+    parts = [f"Source 1:\n[Computed from the spreadsheet] {table_text}"]
+    for i, c in enumerate(rag_chunks, start=2):
+        parts.append(f"Source {i}:\n{c['text']}")
+    context = "\n\n".join(parts)
+    prompt = _COMBINED_TEMPLATE.format(context_str=context, query_str=question)
+
+    raw, hold = "", ""
+    for resp in get_provider().llm().stream_complete(prompt):
+        delta = resp.delta or ""
+        if not delta:
+            continue
+        raw += delta
+        emit, hold = _strip_for_display(hold + delta)
+        if emit:
+            yield ("token", emit)
+    tail = _DISP_COMPLETE.sub("", hold)
+    if tail:
+        yield ("token", tail)
+
+    # Combined path never hard-refuses (it always has the computed figure); citations are
+    # resolved where present, answer prose is always kept.
+    answer = raw.strip()
+    citations: list[dict] = []
+    for n in sorted({int(m) for m in _CITE_RE.findall(answer)}):
+        if n == 1 and table_cite:
+            citations.append({**table_cite, "display_index": 1})
+        elif n >= 2 and (n - 2) < len(rag_chunks):
+            c = _citation_from_chunk(db, n, rag_chunks[n - 2])
+            if c:
+                citations.append(c)
+    if citations:
+        answer, citations = _renumber(answer, citations)
+    yield ("done", {"answer": answer, "grounded": bool(citations), "citations": citations})
 
 
 def answer_question(db: Session, source_ids: list[str], question: str) -> dict:

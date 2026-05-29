@@ -14,7 +14,7 @@ from ..rag.assist import (
 )
 from ..providers import get_provider
 from ..rag.engine import _DISP_COMPLETE as _DISP
-from ..rag.engine import answer_question, stream_answer, stream_plain
+from ..rag.engine import answer_question, stream_answer, stream_combined, stream_plain
 from ..schemas import (
     ChatRequest,
     ChatResponse,
@@ -110,7 +110,7 @@ def chat(notebook_id: str, payload: ChatRequest, db: Session = Depends(get_db)):
             citations=[], intent=intent, follow_ups=follow(text),
         )
 
-    # factual — spreadsheet reasoning first
+    # factual — spreadsheet reasoning first, merged with prose when mixed
     if intent == "factual":
         table = answer_with_tables(db, notebook_id, payload.question, source_ids)
         if table:
@@ -118,18 +118,27 @@ def chat(notebook_id: str, payload: ChatRequest, db: Session = Depends(get_db)):
                 source_title=table["source_title"], sql=table["sql"],
                 columns=table["columns"], rows=table["rows"], truncated=table["truncated"],
             )
+            kinds = {s.id: s.kind for s in nb.sources}
+            rag_ids = [sid for sid in source_ids if kinds.get(sid) != "xlsx"]
+            if rag_ids:
+                merged = _consume(stream_combined(db, rag_ids, payload.question, table))
+                ans = merged["answer"]
+                cites = merged["citations"] or table["citations"]
+            else:
+                ans = table["answer"]
+                cites = table["citations"]
             assistant = Message(
-                notebook_id=notebook_id, role="assistant", text=table["answer"],
+                notebook_id=notebook_id, role="assistant", text=ans,
                 table_json=table_out.model_dump_json(), thread_id=payload.thread_id,
             )
             db.add(assistant)
             db.flush()
-            _persist_citations(db, assistant.id, table["citations"])
+            _persist_citations(db, assistant.id, cites)
             db.commit()
             return ChatResponse(
-                message_id=assistant.id, answer_markdown=table["answer"], grounded=True,
-                citations=[CitationOut(**c) for c in table["citations"]],
-                table_result=table_out, intent="factual", follow_ups=follow(table["answer"]),
+                message_id=assistant.id, answer_markdown=ans, grounded=True,
+                citations=[CitationOut(**c) for c in cites],
+                table_result=table_out, intent="factual", follow_ups=follow(ans),
             )
         result = answer_question(db, source_ids, payload.question)
     else:  # synthesis
@@ -214,30 +223,45 @@ def chat_stream(notebook_id: str, payload: ChatRequest):
                 })
                 return
 
-            # --- factual: spreadsheet reasoning first, then strict grounded RAG ---
+            # --- factual: spreadsheet reasoning first, merged with prose when mixed ---
             if intent == "factual":
                 table = answer_with_tables(db, notebook_id, payload.question, source_ids)
                 if table:
-                    display = _DISP.sub("", table["answer"]).strip()
-                    for w in _word_chunks(display):
-                        yield _sse({"type": "token", "delta": w})
+                    kinds = {s.id: s.kind for s in nb.sources}
+                    rag_ids = [sid for sid in source_ids if kinds.get(sid) != "xlsx"]
                     table_out = TableResult(
                         source_title=table["source_title"], sql=table["sql"],
                         columns=table["columns"], rows=table["rows"], truncated=table["truncated"],
                     )
+                    if rag_ids:
+                        # MIXED notebook: merge the computed figure with document prose.
+                        final = None
+                        for kind, data in stream_combined(db, rag_ids, payload.question, table):
+                            if kind == "token":
+                                yield _sse({"type": "token", "delta": data})
+                            else:
+                                final = data
+                        cites = final["citations"] or table["citations"]
+                    else:
+                        # XLSX-only notebook: stream the computed answer as-is.
+                        display = _DISP.sub("", table["answer"]).strip()
+                        for w in _word_chunks(display):
+                            yield _sse({"type": "token", "delta": w})
+                        final = {"answer": table["answer"], "grounded": True}
+                        cites = table["citations"]
                     assistant = Message(
-                        notebook_id=notebook_id, role="assistant", text=table["answer"],
+                        notebook_id=notebook_id, role="assistant", text=final["answer"],
                         table_json=table_out.model_dump_json(), thread_id=payload.thread_id,
                     )
                     db.add(assistant)
                     db.flush()
-                    _persist_citations(db, assistant.id, table["citations"])
+                    _persist_citations(db, assistant.id, cites)
                     db.commit()
                     yield _sse({
                         "type": "done", "message_id": assistant.id,
-                        "answer_markdown": table["answer"], "grounded": True,
-                        "citations": table["citations"], "table_result": table_out.model_dump(),
-                        "intent": "factual", "follow_ups": _suggest(table["answer"]),
+                        "answer_markdown": final["answer"], "grounded": True,
+                        "citations": cites, "table_result": table_out.model_dump(),
+                        "intent": "factual", "follow_ups": _suggest(final["answer"]),
                     })
                     return
 

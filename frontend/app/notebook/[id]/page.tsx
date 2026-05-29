@@ -120,12 +120,17 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const newThread = () => {
     if (streaming !== null) return;
     setChatError(null);
+    setFollowUps([]);
     setMessages([]);
-    setThreadId(crypto.randomUUID());
+    // A unique thread key. NOT crypto.randomUUID() — that only exists in secure
+    // contexts (HTTPS/localhost), so it throws when served over plain HTTP on a LAN /
+    // Tailscale IP. A timestamp+random string is a perfectly good thread_id.
+    setThreadId(`t-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
   };
   const switchThread = (tid: string) => {
     if (streaming !== null || tid === threadId) return;
     setChatError(null);
+    setFollowUps([]);
     setThreadId(tid);
   };
 

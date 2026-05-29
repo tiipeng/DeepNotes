@@ -183,9 +183,18 @@ Health check: `curl localhost:8000/health`
 ```bash
 cd frontend
 pnpm install
-echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
 pnpm dev                                      # http://localhost:3000
 ```
+By default the frontend targets the backend on **the same host it's opened from**, port 8100,
+so it works on `localhost` and from another machine on your network with no config. Override
+only if your backend is elsewhere:
+```bash
+echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
+```
+
+> **Accessing from another machine:** open `http://<this-host's-ip>:<frontend-port>` — the
+> frontend auto-targets the backend on that same host. Just add that origin to `CORS_ORIGINS`
+> in `backend/.env` (e.g. `http://192.168.1.50:3000`).
 
 ### Verify it works
 1. Open <http://localhost:3000> → **New notebook**.

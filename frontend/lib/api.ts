@@ -14,7 +14,17 @@ import type {
   Thread,
 } from "./types";
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Resolve the backend URL. If NEXT_PUBLIC_API_URL is set, use it. Otherwise derive it from
+// the host the page was loaded from (port 8100) — so the app works on localhost AND over a
+// LAN / Tailscale / remote IP with no reconfiguration (the browser always hits the backend
+// on the same host it loaded the frontend from).
+const BACKEND_PORT = 8100;
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL.length > 0
+    ? process.env.NEXT_PUBLIC_API_URL
+    : typeof window !== "undefined"
+      ? `${window.location.protocol}//${window.location.hostname}:${BACKEND_PORT}`
+      : `http://localhost:${BACKEND_PORT}`;
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

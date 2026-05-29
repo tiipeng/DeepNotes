@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  addUrlSource,
   createNote,
   deleteNote,
   getMessages,
@@ -193,6 +194,25 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
     }
   };
 
+  const onAddUrl = async (url: string) => {
+    const tmpId = `tmp-${Date.now()}`;
+    const tmp: Source = {
+      id: tmpId, notebook_id: notebookId, kind: "url",
+      title: url, authors: null, venue: null, year: null, pages: null,
+      status: "parsing", error_msg: null, checked: true, char_count: 0,
+      created_at: new Date().toISOString(),
+    };
+    setSources((prev) => [...prev, tmp]);
+    try {
+      await addUrlSource(notebookId, url);
+      await loadSources();
+    } catch (e) {
+      setSources((prev) => prev.filter((s) => s.id !== tmpId));
+      await loadSources();
+      flash(e instanceof Error ? e.message : "Couldn't add link");
+    }
+  };
+
   const ask = async (question: string) => {
     const q = question.trim();
     if (!q || streaming !== null) return;
@@ -258,6 +278,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               checkedCount={checkedReady.length}
               onToggle={onToggle}
               onUpload={onUpload}
+              onAddUrl={onAddUrl}
             />
             <ChatPanel
               messages={messages}
@@ -297,14 +318,26 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
 
 /* ---------------- Sources ---------------- */
 function SourcesPanel({
-  sources, checkedCount, onToggle, onUpload,
+  sources, checkedCount, onToggle, onUpload, onAddUrl,
 }: {
   sources: Source[];
   checkedCount: number;
   onToggle: (s: Source) => void;
   onUpload: (f: File) => void;
+  onAddUrl: (url: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [showLink, setShowLink] = useState(false);
+  const [urlVal, setUrlVal] = useState("");
+
+  const submitUrl = () => {
+    const u = urlVal.trim();
+    if (!/^https?:\/\//i.test(u)) return;
+    onAddUrl(u);
+    setUrlVal("");
+    setShowLink(false);
+  };
+
   return (
     <aside className="dn-col">
       <div className="dn-col-head">
@@ -318,7 +351,7 @@ function SourcesPanel({
         ref={fileRef}
         type="file"
         hidden
-        accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,.html"
+        accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,.html,.mp3,.wav,.m4a"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) onUpload(f);
@@ -328,6 +361,25 @@ function SourcesPanel({
       <button className="dn-add-source" onClick={() => fileRef.current?.click()}>
         <IconPlus size={14} /> <span>Add source</span>
       </button>
+
+      <button className="dn-add-link" onClick={() => setShowLink((v) => !v)}>
+        <IconLink size={13} /> <span>Add a web page or YouTube link</span>
+      </button>
+      {showLink && (
+        <div className="dn-link-row">
+          <input
+            className="dn-link-input"
+            placeholder="https://…"
+            value={urlVal}
+            autoFocus
+            onChange={(e) => setUrlVal(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submitUrl()}
+          />
+          <button className="dn-btn dn-btn-primary dn-btn-tight" onClick={submitUrl} disabled={!/^https?:\/\//i.test(urlVal.trim())}>
+            Add
+          </button>
+        </div>
+      )}
 
       <div className="dn-source-actions">
         <span>Include in chat</span>

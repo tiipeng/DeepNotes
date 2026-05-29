@@ -70,6 +70,28 @@ export async function uploadSource(notebookId: string, file: File): Promise<Sour
 
 export const listThreads = (notebookId: string) =>
   req<Thread[]>(`/notebooks/${notebookId}/threads`);
+export async function addUrlSource(notebookId: string, url: string): Promise<Source> {
+  const fd = new FormData();
+  fd.append("url", url);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/notebooks/${notebookId}/sources`, { method: "POST", body: fd });
+  } catch {
+    throw new Error("Can't reach the backend. Check your connection and try again.");
+  }
+  if (!res.ok) {
+    let detail = `Couldn't add link (${res.status}).`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      /* non-JSON */
+    }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
 export const getMessages = (notebookId: string, threadId?: string) =>
   req<Message[]>(
     `/notebooks/${notebookId}/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`,

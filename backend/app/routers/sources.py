@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, get_db
-from ..ingest.parse import parse_document, parse_plain_text, resolve_at
+from ..ingest.parse import parse_document, parse_plain_text, parse_url, resolve_at
 from ..ingest.pipeline import ingest_source
 from ..models import Chunk, Notebook, Source
 from ..schemas import PassageRead, SourceContent, SourcePatch, SourceRead
@@ -69,8 +69,10 @@ def _process_source(
                 parsed = parse_plain_text(plain_text)
             elif kind == "xlsx":
                 parsed = parse_xlsx(tmp_path)
+            elif kind == "url":
+                parsed = parse_url(url)
             else:
-                parsed = parse_document(tmp_path or url)
+                parsed = parse_document(tmp_path)
 
             existing_pages = sum(
                 s.pages or 0 for s in source.notebook.sources if s.id != source.id
@@ -80,6 +82,11 @@ def _process_source(
                 source.error_msg = f"Would exceed the {MAX_PAGES_TOTAL}-page total budget"
                 db.commit()
                 return
+
+            # Use a better title discovered during parsing (e.g. article title) when the
+            # user didn't provide one (current title is still the raw URL).
+            if parsed.title and source.title == url:
+                source.title = parsed.title[:200]
 
             ingest_source(db, source, parsed)  # sets status -> ready on success
             if kind == "xlsx":

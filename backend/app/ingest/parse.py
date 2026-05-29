@@ -38,6 +38,7 @@ class ParsedDoc:
     markdown: str
     spans: list[Span]
     num_pages: int
+    title: str | None = None  # a better title discovered during parsing (e.g. article/video title)
 
 
 @lru_cache(maxsize=2)
@@ -110,6 +111,57 @@ def _needs_ocr(parsed: ParsedDoc) -> bool:
 
 def parse_plain_text(text: str) -> ParsedDoc:
     return ParsedDoc(markdown=text, spans=[Span(0, len(text), None, None)], num_pages=0)
+
+
+def parse_markdown_sections(markdown: str, num_pages: int = 0, title: str | None = None) -> ParsedDoc:
+    """Build page/section spans from markdown headings — one span per section, so any
+    char offset resolves to the heading it lives under. Shared by URL / YouTube / audio
+    sources so their citations work exactly like PDF citations."""
+    spans: list[Span] = []
+    section: str | None = None
+    seg_start = 0
+    pos = 0
+    for line in markdown.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            if pos > seg_start:
+                spans.append(Span(seg_start, pos, None, section))
+            section = stripped.lstrip("#").strip() or section
+            seg_start = pos
+        pos += len(line)
+    if pos > seg_start:
+        spans.append(Span(seg_start, pos, None, section))
+    if not spans:
+        spans = [Span(0, len(markdown), None, None)]
+    return ParsedDoc(markdown=markdown, spans=spans, num_pages=num_pages, title=title)
+
+
+def parse_url(url: str) -> ParsedDoc:
+    """Robust article extraction: main content only (nav/ads/boilerplate stripped),
+    headings preserved as markdown sections for citation metadata."""
+    import trafilatura
+
+    downloaded = trafilatura.fetch_url(url)
+    if not downloaded:
+        raise ValueError("Couldn't fetch the URL (unreachable or blocked).")
+    md = trafilatura.extract(
+        downloaded,
+        output_format="markdown",
+        include_comments=False,
+        include_tables=True,
+        favor_recall=True,
+    )
+    if not md or len(md.strip()) < 50:
+        raise ValueError("No readable article content found at this URL.")
+    title = None
+    try:
+        meta = trafilatura.extract_metadata(downloaded)
+        title = (meta.title or None) if meta else None
+    except Exception:
+        title = None
+    if title:
+        md = f"## {title}\n\n{md}"
+    return parse_markdown_sections(md, title=title)
 
 
 def parse_document(source: str | Path) -> ParsedDoc:

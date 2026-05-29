@@ -10,6 +10,39 @@ Ollama path), so your documents never have to leave a machine you control.
 
 ---
 
+## DeepNotes vs. NotebookLM
+
+DeepNotes is deliberately NotebookLM-shaped — grounded chat over your own sources with
+verifiable citations — but it makes the opposite trade-off on *control*: it's open-source and
+self-hosted instead of a polished managed cloud product. An honest comparison:
+
+| | **DeepNotes** | **NotebookLM** (Google) |
+|---|---|---|
+| **Hosting & data** | Self-hosted; runs entirely on your hardware. Originals discarded after parsing | Google cloud only; your sources are uploaded to Google |
+| **Open source** | Yes — inspect/modify the whole pipeline | No (closed) |
+| **Model choice** | Bring your own: Gemini, OpenRouter (200+ models), any OpenAI-compatible endpoint, or fully-local Ollama | Gemini only, fixed |
+| **Air-gapped / fully local** | Possible (Ollama for both chat + embeddings) | No |
+| **Citations** | Click → exact highlighted passage; page/section for docs, **timestamp** for audio/video, **row-level** for spreadsheets | Inline citations → source snippet (well done, but not row-level on sheets) |
+| **Spreadsheets** | **Real text-to-SQL** over XLSX (true `GROUP BY`/`SUM`) with citations to the exact rows | Treated as text — no real numeric/aggregate reasoning |
+| **Source types** | PDF (incl. scanned via OCR), DOCX, PPTX, TXT/MD, XLSX, web URL, YouTube, audio | PDF, Google Docs/Slides, web URL, YouTube, pasted text, audio — plus deep Google Workspace integration |
+| **Audio Overview (podcast), Video Overview, Mind Maps** | Not yet (Audio Overview is a stub) | Yes — flagship, very good |
+| **Scale & polish** | Prototype: single-user, ~10 sources/notebook, no auth | Production: many sources, huge context, mobile apps, sharing |
+| **Price** | Free (you pay your own model/API costs) | Free tier + paid (NotebookLM Plus) |
+
+**Where DeepNotes genuinely wins:** data sovereignty (self-hosted, originals discarded,
+air-gappable), model freedom (no vendor lock-in), and real spreadsheet reasoning with row-level
+citations. **Where NotebookLM wins:** it's a mature, polished product at scale — Audio/Video
+Overviews, Mind Maps, Workspace integration, large source counts, multi-user, and zero setup.
+
+**Pick DeepNotes** if you need your documents to stay on infrastructure you control, want to
+choose your own model, or work with spreadsheets. **Pick NotebookLM** if you want the most
+polished experience with the least setup and your data can live in Google's cloud.
+
+> Honest caveat: DeepNotes is an open prototype (see *Limitations*), not a drop-in NotebookLM
+> replacement. It matches the core loop — grounded, cited chat — not the breadth or polish.
+
+---
+
 ## 1. Features
 
 **Notebooks & sources**
@@ -61,20 +94,28 @@ Each message is classified (a cheap LLM call, with a greeting fast-path) and rou
 - **conversational** ("hello", "thanks") — a brief, friendly reply; no retrieval, no refusal.
 
 **Experience**
-- **Streaming** answers (token-by-token over SSE); citation chips and follow-up suggestions attach
-  once the answer completes.
+- **Streaming, formatted answers** — tokens stream over SSE with markdown (bold, lists, headings)
+  rendered live; citation chips slot in on completion without the prose re-formatting.
 - **Persistent overview** — a grounded summary of the notebook, always visible at the top of the
   chat (cached; regenerated when the source set changes).
 - **Suggested questions** — grounded starter questions up front, and 2–3 contextual follow-ups
   after each answer.
 - **Notes** — save an answer or a cited passage into the notebook.
-- **Threads** — multiple conversations per notebook, isolated and switchable.
+- **Threads** — multiple conversations per notebook, isolated and switchable (each keeps its own
+  messages + citations).
 - **Answers follow the question's language** (e.g. a German question gets a German answer);
   citations and source content are unchanged.
 - **Bring your own chat model** — choose the model that generates answers (Google Gemini,
   OpenRouter's 200+ models, any OpenAI-compatible endpoint, or local Ollama) and paste your
   own key in Settings. Embeddings stay pinned to one model, so switching the chat model never
   invalidates your vector store or citations.
+
+**Workspace**
+- **Multi-file upload** — add several files at once, or attach a file straight from the chat box;
+  each ingests in the background with per-file status.
+- **⌘K command palette** — search across notebook and source titles and jump to a result.
+- **Manage notebooks** — create, rename, and delete (with confirm) from in-app dialogs (no
+  native browser prompts).
 
 ---
 
@@ -156,7 +197,8 @@ pnpm dev                                      # http://localhost:3000
 │    Studio                    │ stream  │    youtube-transcript-api · faster-whisper     │
 │  • Citation drawer           │         │  RAG: LlamaIndex CitationQueryEngine           │
 └─────────────────────────────┘         │  Spreadsheet: DuckDB text-to-SQL (sandboxed)   │
-   Deploy: Vercel or any host            │  Provider: Gemini (default) | Ollama           │
+   Deploy: Vercel or any host            │  Chat LLM: Gemini|OpenRouter|OpenAI-compat|    │
+                                         │    Ollama (BYO key) · Embeddings: pinned       │
                                          │                                                │
                                          │   SQLite (metadata)   Chroma (vectors)         │
                                          │   DuckDB (XLSX tables)                          │
@@ -317,17 +359,17 @@ The path from prototype to product:
 ```
 backend/
   app/
-    main.py · config.py · db.py · models.py · schemas.py
-    providers/   gemini · ollama · factory        (LLM/embedding abstraction)
+    main.py · config.py · db.py · models.py · schemas.py · runtime.py (chat-model settings)
+    providers/   gemini · ollama · factory (embeddings) · chat (selectable BYO chat LLM)
     ingest/      parse (Docling/OCR/web/YouTube/audio) · pipeline (chunk→embed→store)
     rag/         engine (CitationQueryEngine, streaming) · locate (offset resolver)
                  · assist (intent router) · summary (overview)
     spreadsheet/ store (xlsx→duckdb) · engine (text-to-SQL, row citations)
     stores/      chroma
-    routers/     notebooks · sources · chat · notes
+    routers/     notebooks · sources · chat · notes · settings · search
 frontend/
   app/           dashboard · notebook/[id] · globals.css (design tokens)
-  components/     TopBar · icons
+  components/     TopBar (search palette + settings) · NameModal · ConfirmModal · Markdown · icons
   lib/            api client · types
 docs/            planning + audit notes (DUE_DILIGENCE · SECURITY_VERIFICATION · QA_REPORT · …)
 ```

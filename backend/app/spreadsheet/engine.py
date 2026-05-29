@@ -14,7 +14,7 @@ import re
 from sqlalchemy.orm import Session
 
 from ..models import Source
-from ..providers import get_provider
+from ..providers import get_chat_llm
 from .store import notebook_table_schemas, run_select
 
 _SQL_GUARD = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
@@ -199,7 +199,7 @@ def answer_with_tables(
     if not schemas:
         return None
 
-    llm = get_provider().llm()
+    llm = get_chat_llm()
     raw = llm.complete(_SQL_PROMPT.format(schema=_schema_text(schemas), question=question)).text
     sql, evidence_sql = _extract_plan(raw)
     if not sql or not _SQL_GUARD.match(sql):  # read-only guard

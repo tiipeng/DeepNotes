@@ -104,6 +104,20 @@ export interface NotebookOverview {
   ready: boolean;
 }
 
+export interface ChatSettings {
+  chat_provider: string;
+  chat_model: string;
+  openrouter_base_url: string;
+  openai_compatible_base_url: string;
+  ollama_base_url: string;
+  has_openrouter_key: boolean;
+  has_openai_compatible_key: boolean;
+  has_gemini_key: boolean;
+  embedding_provider: string;
+  active_chat: string;
+  providers: string[];
+}
+
 export interface Health {
   status: string;
   provider: string;

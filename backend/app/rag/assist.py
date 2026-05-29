@@ -10,7 +10,7 @@ import json
 import re
 
 from ..models import Source
-from ..providers import get_provider
+from ..providers import get_chat_llm
 
 _FENCE = re.compile(r"```(?:json)?|```", re.IGNORECASE)
 
@@ -55,7 +55,7 @@ def classify_intent(question: str, has_sources: bool) -> str:
     if _GREETING.match(q):
         return "conversational"
     try:
-        raw = get_provider().llm().complete(_INTENT_PROMPT.format(q=_for_classify(q))).text
+        raw = get_chat_llm().complete(_INTENT_PROMPT.format(q=_for_classify(q))).text
     except Exception:
         return "factual"  # safe default: strict grounded path
     label = raw.strip().lower().split()[0].strip(".:") if raw.strip() else "factual"
@@ -125,7 +125,7 @@ def follow_up_questions(
         n=n, excerpts=_excerpts(sources), question=question[:400], answer=answer[:800]
     )
     try:
-        raw = get_provider().llm().complete(prompt).text
+        raw = get_chat_llm().complete(prompt).text
         text = _FENCE.sub("", raw).strip()
         items = json.loads(text)
         out = [str(x).strip() for x in items if str(x).strip()]

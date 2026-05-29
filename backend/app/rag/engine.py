@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..ingest.parse import resolve_at
 from ..models import Chunk, Source
-from ..providers import get_provider
+from ..providers import get_chat_llm, get_provider
 from ..stores.chroma import get_vector_store
 from .locate import locate_span
 
@@ -89,7 +89,7 @@ def _strip_prefix(text: str) -> str:
 
 def _build_engine(source_ids: list[str], top_k: int = 8) -> CitationQueryEngine:
     provider = get_provider()
-    Settings.llm = provider.llm()
+    Settings.llm = get_chat_llm()
     Settings.embed_model = provider.embedding()
 
     index = VectorStoreIndex.from_vector_store(
@@ -104,7 +104,7 @@ def _build_engine(source_ids: list[str], top_k: int = 8) -> CitationQueryEngine:
     )
     return CitationQueryEngine.from_args(
         index,
-        llm=provider.llm(),
+        llm=get_chat_llm(),
         similarity_top_k=top_k,
         filters=filters,
         citation_chunk_size=48,  # ~1 sentence per cited unit (tight, no heading graze)
@@ -228,7 +228,7 @@ def stream_plain(prompt: str):
     """Stream a plain LLM reply (no retrieval, no citations) — for conversational/meta
     intents. Yields ('token', delta) then ('done', {...}) like stream_answer."""
     raw = ""
-    for resp in get_provider().llm().stream_complete(prompt):
+    for resp in get_chat_llm().stream_complete(prompt):
         delta = resp.delta or ""
         if delta:
             raw += delta
@@ -238,7 +238,7 @@ def stream_plain(prompt: str):
 
 def _retrieve_citation_chunks(source_ids: list[str], question: str, top_k: int = 8) -> list[dict]:
     provider = get_provider()
-    Settings.llm = provider.llm()
+    Settings.llm = get_chat_llm()
     Settings.embed_model = provider.embedding()
     index = VectorStoreIndex.from_vector_store(
         get_vector_store(), embed_model=provider.embedding()
@@ -321,7 +321,7 @@ def stream_answer(db: Session, source_ids: list[str], question: str, mode: str =
 
     raw = ""
     hold = ""
-    for resp in get_provider().llm().stream_complete(prompt):
+    for resp in get_chat_llm().stream_complete(prompt):
         delta = resp.delta or ""
         if not delta:
             continue
@@ -366,7 +366,7 @@ def stream_combined(db: Session, rag_source_ids: list[str], question: str, table
     prompt = _COMBINED_TEMPLATE.format(context_str=context, query_str=question)
 
     raw, hold = "", ""
-    for resp in get_provider().llm().stream_complete(prompt):
+    for resp in get_chat_llm().stream_complete(prompt):
         delta = resp.delta or ""
         if not delta:
             continue

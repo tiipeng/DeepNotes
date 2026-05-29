@@ -21,6 +21,7 @@ import {
 } from "@/lib/api";
 import { NameModal } from "@/components/NameModal";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { Markdown } from "@/components/Markdown";
 import type {
   Citation,
   Message,
@@ -258,9 +259,9 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
         };
         setMessages((prev) => [...prev, asst]);
         setStreaming(null);
-        setFollowUps(done.follow_ups ?? []);
         loadThreads().catch(() => {}); // surface a brand-new thread in the switcher
       },
+      onFollowups: (fu) => setFollowUps(fu),
       onError: (detail) => {
         setChatError(detail);
         setStreaming(null);
@@ -812,7 +813,7 @@ function StreamingMessage({ text }: { text: string }) {
       </div>
       {text ? (
         <div className="dn-answer">
-          {text}
+          <Markdown text={text} />
           <span className="dn-stream-cursor" aria-hidden />
         </div>
       ) : (
@@ -853,7 +854,7 @@ function AssistantMessage({
       </div>
 
       <div className={`dn-answer ${isRefusal ? "dn-answer-notfound" : ""}`}>
-        {renderAnswer(m.text, byId, openCite, onCite)}
+        <Markdown text={m.text} byId={byId} openCite={openCite} onCite={onCite} />
       </div>
 
       {table && <TableCard table={table} />}
@@ -901,45 +902,6 @@ function AssistantMessage({
   );
 }
 
-function renderAnswer(
-  text: string,
-  byId: Map<number, Citation>,
-  openCite: Citation | null,
-  onCite: (c: Citation) => void,
-) {
-  const parts = text.split(/(\[\d+\])/g);
-  return parts.map((part, i) => {
-    const m = part.match(/^\[(\d+)\]$/);
-    if (m) {
-      const n = Number(m[1]);
-      const c = byId.get(n);
-      if (c) {
-        if (isDeletedCite(c)) {
-          return (
-            <span key={i} className="dn-cite dn-cite-dead" title="Source removed from this notebook">
-              <span className="dn-cite-bracket">⟦</span>
-              <span className="dn-cite-n">{n}</span>
-              <span className="dn-cite-bracket">⟧</span>
-            </span>
-          );
-        }
-        return (
-          <button
-            key={i}
-            className={`dn-cite ${openCite?.display_index === n ? "is-active" : ""}`}
-            onClick={() => onCite(c)}
-            title="Open cited passage"
-          >
-            <span className="dn-cite-bracket">⟦</span>
-            <span className="dn-cite-n">{n}</span>
-            <span className="dn-cite-bracket">⟧</span>
-          </button>
-        );
-      }
-    }
-    return <span key={i}>{part}</span>;
-  });
-}
 
 function TableCard({ table }: { table: TableResult }) {
   const fmt = (v: string | number | boolean | null) =>

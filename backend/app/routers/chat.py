@@ -228,8 +228,9 @@ def chat_stream(notebook_id: str, payload: ChatRequest):
                     "type": "done", "message_id": assistant.id,
                     "answer_markdown": final["answer"], "grounded": False,
                     "citations": [], "table_result": None, "intent": intent,
-                    "follow_ups": _suggest(final["answer"]),
+                    "follow_ups": [],
                 })
+                yield _sse({"type": "followups", "follow_ups": _suggest(final["answer"])})
                 return
 
             # --- factual: spreadsheet reasoning first, merged with prose when mixed ---
@@ -270,8 +271,9 @@ def chat_stream(notebook_id: str, payload: ChatRequest):
                         "type": "done", "message_id": assistant.id,
                         "answer_markdown": final["answer"], "grounded": True,
                         "citations": cites, "table_result": table_out.model_dump(),
-                        "intent": "factual", "follow_ups": _suggest(final["answer"]),
+                        "intent": "factual", "follow_ups": [],
                     })
+                    yield _sse({"type": "followups", "follow_ups": _suggest(final["answer"])})
                     return
 
             # factual (no table) or synthesis -> streamed RAG
@@ -293,8 +295,9 @@ def chat_stream(notebook_id: str, payload: ChatRequest):
                 "type": "done", "message_id": assistant.id,
                 "answer_markdown": final["answer"], "grounded": final["grounded"],
                 "citations": final["citations"], "table_result": None, "intent": intent,
-                "follow_ups": _suggest(final["answer"]),
+                "follow_ups": [],
             })
+            yield _sse({"type": "followups", "follow_ups": _suggest(final["answer"])})
         except Exception:
             db.rollback()
             yield _sse({"type": "error", "detail": "Something went wrong answering that. Please try again."})

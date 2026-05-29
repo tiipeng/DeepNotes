@@ -131,6 +131,7 @@ export async function streamChat(
     onToken: (delta: string) => void;
     onDone: (d: StreamDone) => void;
     onError: (detail: string) => void;
+    onFollowups?: (followUps: string[]) => void;
   },
   signal?: AbortSignal,
 ): Promise<void> {
@@ -166,6 +167,7 @@ export async function streamChat(
         const obj = JSON.parse(line.slice(6));
         if (obj.type === "token") handlers.onToken(obj.delta as string);
         else if (obj.type === "done") handlers.onDone(obj as StreamDone);
+        else if (obj.type === "followups") handlers.onFollowups?.(obj.follow_ups as string[]);
         else if (obj.type === "error") handlers.onError(obj.detail as string);
       }
     }

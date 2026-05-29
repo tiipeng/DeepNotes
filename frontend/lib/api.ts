@@ -108,6 +108,8 @@ export interface StreamDone {
   grounded: boolean;
   citations: Citation[];
   table_result: TableResult | null;
+  intent?: string;
+  follow_ups?: string[];
 }
 
 /** POST a question and stream the answer over SSE. Calls onToken as prose

@@ -29,6 +29,9 @@ import type {
 } from "@/lib/types";
 
 const stripMarkers = (s: string) => s.replace(/\s*\[\d+\]/g, "");
+// The exact strict-grounding refusal (mirrors backend NOT_FOUND); used to style a
+// genuine "not found" differently from a normal conversational/meta reply.
+const NOT_FOUND = "I couldn't find an answer to that in your sources.";
 import { TopBar } from "@/components/TopBar";
 import {
   IconAttach,
@@ -56,6 +59,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [followUps, setFollowUps] = useState<string[]>([]);
   const [openCite, setOpenCite] = useState<Citation | null>(null);
   const [passage, setPassage] = useState<Passage | null>(null);
   const [overview, setOverview] = useState<NotebookOverview | null>(null);
@@ -217,6 +221,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
     const q = question.trim();
     if (!q || streaming !== null) return;
     setChatError(null);
+    setFollowUps([]);
     setStreaming("");
     const userMsg: Message = {
       id: `u-${Date.now()}`, role: "user", text: q,
@@ -233,6 +238,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
         };
         setMessages((prev) => [...prev, asst]);
         setStreaming(null);
+        setFollowUps(done.follow_ups ?? []);
         loadThreads().catch(() => {}); // surface a brand-new thread in the switcher
       },
       onError: (detail) => {
@@ -284,6 +290,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               messages={messages}
               streaming={streaming}
               chatError={chatError}
+              followUps={followUps}
               sourceCount={checkedReady.length}
               overview={overview}
               overviewLoading={overviewLoading}
@@ -446,11 +453,12 @@ function SourcesPanel({
 /* ---------------- Chat ---------------- */
 function ChatPanel({
   messages, streaming, chatError, sourceCount, overview, overviewLoading,
-  threads, threadId, onNewThread, onSwitchThread, openCite, onCite, onAsk, onSaveNote,
+  threads, threadId, onNewThread, onSwitchThread, openCite, onCite, onAsk, onSaveNote, followUps,
 }: {
   messages: Message[];
   streaming: string | null;
   chatError: string | null;
+  followUps: string[];
   sourceCount: number;
   overview: NotebookOverview | null;
   overviewLoading: boolean;
@@ -469,7 +477,7 @@ function ChatPanel({
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, streaming, chatError]);
+  }, [messages, streaming, chatError, followUps]);
 
   const submit = () => {
     onAsk(input);
@@ -490,6 +498,13 @@ function ChatPanel({
         />
       </div>
 
+      <OverviewBlock
+        overview={overview}
+        overviewLoading={overviewLoading}
+        sourceCount={sourceCount}
+        onAsk={onAsk}
+      />
+
       <div className="dn-chat-scroll" ref={scrollRef}>
         {empty ? (
           <div className="dn-chat-empty">
@@ -501,25 +516,10 @@ function ChatPanel({
             {overview?.ready ? (
               <>
                 <h2 className="dn-empty-title">Ask anything across your sources.</h2>
-                {overview.summary && <p className="dn-empty-sub">{overview.summary}</p>}
-                {overview.suggested_questions.length > 0 && (
-                  <div className="dn-suggest">
-                    <div className="dn-suggest-label">Suggested questions</div>
-                    <div className="dn-suggest-list">
-                      {overview.suggested_questions.map((q) => (
-                        <button
-                          key={q}
-                          className="dn-suggest-item"
-                          onClick={() => onAsk(q)}
-                          disabled={sourceCount === 0}
-                        >
-                          <span className="dn-suggest-q">{q}</span>
-                          <IconChevronRight size={14} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <p className="dn-empty-sub">
+                  Every claim links back to the exact passage it came from. Try a suggested
+                  question above, or ask your own below.
+                </p>
               </>
             ) : overviewLoading ? (
               <>
@@ -527,19 +527,14 @@ function ChatPanel({
                 <p className="dn-empty-sub">
                   Building an overview and a few good questions to get you started.
                 </p>
-                <div className="dn-suggest-list" aria-hidden>
-                  <div className="dn-skel dn-skel-line" />
-                  <div className="dn-skel dn-skel-line" />
-                  <div className="dn-skel dn-skel-line" style={{ width: "70%" }} />
-                </div>
               </>
             ) : (
               <>
                 <h2 className="dn-empty-title">Add a source to begin.</h2>
                 <p className="dn-empty-sub">
-                  Upload a PDF, document, or spreadsheet on the left. Once it&apos;s indexed,
-                  you&apos;ll get a grounded overview and can ask anything — with every claim
-                  linked to the exact passage it came from.
+                  Upload a PDF, document, spreadsheet, web page, video, or audio file on the
+                  left. Once it&apos;s indexed, you&apos;ll get a grounded overview and can ask
+                  anything — with every claim linked to the exact passage it came from.
                 </p>
               </>
             )}
@@ -556,6 +551,18 @@ function ChatPanel({
               ),
             )}
             {busy && <StreamingMessage text={streaming ?? ""} />}
+            {!busy && followUps.length > 0 && (
+              <div className="dn-followups">
+                <div className="dn-followups-label">Suggested follow-ups</div>
+                <div className="dn-chip-q-row">
+                  {followUps.map((q) => (
+                    <button key={q} className="dn-chip-q" onClick={() => onAsk(q)}>
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {chatError && (
               <div className="dn-chat-error" role="alert">
                 <IconClose size={13} />
@@ -655,6 +662,57 @@ function ThreadBar({
   );
 }
 
+function OverviewBlock({
+  overview, overviewLoading, sourceCount, onAsk,
+}: {
+  overview: NotebookOverview | null;
+  overviewLoading: boolean;
+  sourceCount: number;
+  onAsk: (q: string) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const ready = overview?.ready;
+  if (!ready && !overviewLoading) return null; // nothing to show until sources exist
+
+  return (
+    <div className="dn-overview">
+      <button className="dn-overview-head" onClick={() => setOpen((v) => !v)}>
+        <span className="dn-overview-title">
+          <IconSparkle size={13} /> Overview
+        </span>
+        <span className={`dn-overview-caret ${open ? "is-open" : ""}`}>
+          <IconChevronRight size={13} />
+        </span>
+      </button>
+      {open && (
+        <div className="dn-overview-body">
+          {ready ? (
+            <>
+              {overview!.summary && <p className="dn-overview-summary">{overview!.summary}</p>}
+              {overview!.suggested_questions.length > 0 && (
+                <div className="dn-chip-q-row">
+                  {overview!.suggested_questions.map((q) => (
+                    <button
+                      key={q}
+                      className="dn-chip-q"
+                      onClick={() => onAsk(q)}
+                      disabled={sourceCount === 0}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="dn-skel dn-skel-line" style={{ height: 36 }} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StreamingMessage({ text }: { text: string }) {
   return (
     <div className="dn-msg-assistant">
@@ -689,12 +747,15 @@ function AssistantMessage({
   const byId = new Map(m.citations.map((c) => [c.display_index, c]));
   const grounded = m.citations.length > 0;
   const table = m.table_result;
+  const isRefusal = m.text.trim() === NOT_FOUND;
 
   const byline = table
     ? `Computed from ${table.source_title}`
     : grounded
       ? `Grounded in ${new Set(m.citations.map((c) => c.source_id)).size} source(s)`
-      : "No grounded answer";
+      : isRefusal
+        ? "Not found in your sources"
+        : "DeepNotes";
 
   return (
     <div className="dn-msg-assistant">
@@ -703,7 +764,7 @@ function AssistantMessage({
         <span className="dn-msg-byline-text">{byline}</span>
       </div>
 
-      <div className={`dn-answer ${grounded || table ? "" : "dn-answer-notfound"}`}>
+      <div className={`dn-answer ${isRefusal ? "dn-answer-notfound" : ""}`}>
         {renderAnswer(m.text, byId, openCite, onCite)}
       </div>
 

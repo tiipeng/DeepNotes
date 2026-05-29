@@ -1,5 +1,6 @@
 import type {
   ChatResponse,
+  ChatSettings,
   Citation,
   Health,
   Message,
@@ -26,6 +27,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const getHealth = () => req<Health>("/health");
+export const getSettings = () => req<ChatSettings>("/settings");
+export const updateSettings = (patch: Record<string, string>) =>
+  req<ChatSettings>("/settings", { method: "PUT", body: JSON.stringify(patch) });
 export const listNotebooks = () => req<Notebook[]>("/notebooks");
 export const getNotebook = (id: string) => req<Notebook>(`/notebooks/${id}`);
 export const getNotebookSummary = (id: string) =>

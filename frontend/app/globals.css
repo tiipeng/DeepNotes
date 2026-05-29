@@ -470,6 +470,22 @@ body {
 .dn-thread-item-count { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-2); background: var(--bg-2); border-radius: 4px; padding: 1px 6px; flex-shrink: 0; }
 .dn-thread-scrim { position: fixed; inset: 0; z-index: 20; }
 
+/* Settings modal */
+.dn-modal-scrim { position: fixed; inset: 0; background: rgba(20, 18, 14, 0.32); z-index: 70; }
+.dn-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 71; width: 480px; max-width: 92vw; max-height: 88vh; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); padding: 22px 24px; }
+.dn-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.dn-modal-title { font-family: var(--font-serif); font-size: 20px; font-weight: 500; letter-spacing: -0.01em; color: var(--ink); margin: 0; }
+.dn-modal-sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0 0 18px; }
+.dn-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.dn-field-label { font-size: 12px; font-weight: 500; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
+.dn-field-hint { font-size: 11px; font-weight: 400; color: var(--accent); }
+.dn-input { height: 36px; padding: 0 11px; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); outline: none; transition: border-color 0.15s; width: 100%; }
+.dn-input:focus { border-color: var(--accent-soft-2); box-shadow: 0 0 0 3px var(--accent-soft); }
+select.dn-input { cursor: pointer; }
+.dn-modal-note { font-size: 11.5px; color: var(--muted-2); line-height: 1.5; margin: 4px 0 0; }
+.dn-modal-error { font-size: 12.5px; color: #B85C38; margin: 8px 0 0; }
+.dn-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
 /* Toast */
 .dn-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 60; background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 500; padding: 10px 16px; border-radius: 999px; box-shadow: var(--shadow-pop); animation: dn-toast-in 0.2s ease; }
 @keyframes dn-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }

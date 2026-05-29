@@ -21,6 +21,10 @@ llama-index-embeddings-google-genai
 chromadb
 llama-index-vector-stores-chroma
 
+# Web + media sources (flow through the same parse->chunk->embed pipeline)
+trafilatura            # robust web-article main-content extraction
+youtube-transcript-api # YouTube transcript ingestion
+
 # Spreadsheet reasoning (XLSX differentiator)
 duckdb
 pandas

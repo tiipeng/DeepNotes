@@ -136,6 +136,88 @@ def parse_markdown_sections(markdown: str, num_pages: int = 0, title: str | None
     return ParsedDoc(markdown=markdown, spans=spans, num_pages=num_pages, title=title)
 
 
+_YT_HOSTS = ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be")
+
+
+def is_youtube(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    try:
+        return (urlparse(url).hostname or "").lower() in _YT_HOSTS
+    except Exception:
+        return False
+
+
+def _youtube_id(url: str) -> str | None:
+    from urllib.parse import parse_qs, urlparse
+
+    u = urlparse(url)
+    host = (u.hostname or "").lower()
+    if host in ("youtu.be", "www.youtu.be"):
+        return u.path.lstrip("/").split("/")[0] or None
+    if u.path.startswith(("/shorts/", "/embed/", "/v/")):
+        return u.path.split("/")[2] if len(u.path.split("/")) > 2 else None
+    return (parse_qs(u.query).get("v") or [None])[0]
+
+
+def _youtube_title(url: str) -> str | None:
+    import json
+    import urllib.parse
+    import urllib.request
+
+    try:
+        api = "https://www.youtube.com/oembed?url=" + urllib.parse.quote(url, safe="") + "&format=json"
+        with urllib.request.urlopen(api, timeout=10) as r:
+            return json.load(r).get("title")
+    except Exception:
+        return None
+
+
+def _fmt_ts(seconds: float) -> str:
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
+
+
+def parse_youtube(url: str) -> ParsedDoc:
+    """Pull a YouTube transcript and ingest it as a normal source. Transcript is
+    grouped into ~30s blocks each headed by its timestamp, so citations point into
+    the transcript at a time offset."""
+    from youtube_transcript_api import YouTubeTranscriptApi
+
+    vid = _youtube_id(url)
+    if not vid:
+        raise ValueError("Not a valid YouTube URL.")
+    try:
+        fetched = YouTubeTranscriptApi().fetch(vid)
+    except Exception:
+        raise ValueError("No transcript available for this video (captions may be disabled).")
+
+    segs = [
+        (float(getattr(s, "start", 0.0)), str(getattr(s, "text", "")).strip())
+        for s in fetched
+    ]
+    segs = [s for s in segs if s[1]]
+    if not segs:
+        raise ValueError("This video's transcript is empty.")
+
+    title = _youtube_title(url) or f"YouTube video {vid}"
+    parts = [f"## {title}\n\n"]
+    block: list[str] = []
+    block_start = segs[0][0]
+    for start, text in segs:
+        if start - block_start >= 30 and block:
+            parts.append(f"## [{_fmt_ts(block_start)}]\n\n{' '.join(block)}\n\n")
+            block = []
+            block_start = start
+        block.append(text)
+    if block:
+        parts.append(f"## [{_fmt_ts(block_start)}]\n\n{' '.join(block)}\n\n")
+
+    return parse_markdown_sections("".join(parts), title=title)
+
+
 def parse_url(url: str) -> ParsedDoc:
     """Robust article extraction: main content only (nav/ads/boilerplate stripped),
     headings preserved as markdown sections for citation metadata."""

@@ -7,7 +7,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, get_db
-from ..ingest.parse import parse_document, parse_plain_text, parse_url, resolve_at
+from ..ingest.parse import (
+    is_youtube,
+    parse_document,
+    parse_plain_text,
+    parse_url,
+    parse_youtube,
+    resolve_at,
+)
 from ..ingest.pipeline import ingest_source
 from ..models import Chunk, Notebook, Source
 from ..schemas import PassageRead, SourceContent, SourcePatch, SourceRead
@@ -70,7 +77,7 @@ def _process_source(
             elif kind == "xlsx":
                 parsed = parse_xlsx(tmp_path)
             elif kind == "url":
-                parsed = parse_url(url)
+                parsed = parse_youtube(url) if is_youtube(url) else parse_url(url)
             else:
                 parsed = parse_document(tmp_path)
 

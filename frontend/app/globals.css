@@ -488,6 +488,17 @@ select.dn-input { cursor: pointer; }
 .dn-modal-note { font-size: 11.5px; color: var(--muted-2); line-height: 1.5; margin: 4px 0 0; }
 .dn-modal-error { font-size: 12.5px; color: #B85C38; margin: 8px 0 0; }
 .dn-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.dn-btn-danger { background: #B85C38; color: #fff; border: 1px solid #9f4a2b; }
+.dn-btn-danger:hover { background: #9f4a2b; }
+
+/* Dropdown menu (notebook ⋯) */
+.dn-menu-wrap { position: relative; display: inline-flex; }
+.dn-menu-scrim { position: fixed; inset: 0; z-index: 30; }
+.dn-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 31; min-width: 180px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-pop); padding: 5px; }
+.dn-menu-item { display: block; width: 100%; text-align: left; padding: 8px 10px; font-size: 13px; color: var(--ink-2); border-radius: var(--r-sm); background: none; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.dn-menu-item:hover { background: var(--bg-2); color: var(--ink); }
+.dn-menu-item-danger { color: #B85C38; }
+.dn-menu-item-danger:hover { background: rgba(184, 92, 56, 0.08); color: #9f4a2b; }
 
 /* Toast */
 .dn-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 60; background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 500; padding: 10px 16px; border-radius: 999px; box-shadow: var(--shadow-pop); animation: dn-toast-in 0.2s ease; }

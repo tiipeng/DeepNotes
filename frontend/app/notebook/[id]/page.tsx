@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   addUrlSource,
   createNote,
   deleteNote,
+  deleteNotebook,
   getMessages,
   getNotebook,
   getNotebookSummary,
@@ -14,8 +16,11 @@ import {
   listThreads,
   setSourceChecked,
   streamChat,
+  updateNotebook,
   uploadSource,
 } from "@/lib/api";
+import { NameModal } from "@/components/NameModal";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import type {
   Citation,
   Message,
@@ -56,8 +61,12 @@ import {
 } from "@/components/icons";
 
 export default function NotebookPage({ params }: { params: { id: string } }) {
+  const router = useRouter();
   const notebookId = params.id;
   const [notebook, setNotebook] = useState<Notebook | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showRename, setShowRename] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
   const [sources, setSources] = useState<Source[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState<string | null>(null);
@@ -278,7 +287,24 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               <span className="dn-subhead-meta">
                 {notebook ? `Edited ${new Date(notebook.updated_at).toLocaleDateString()}` : ""}
               </span>
-              <button className="dn-icon-btn" title="More"><IconMore size={14} /></button>
+              <div className="dn-menu-wrap">
+                <button className="dn-icon-btn" title="More" onClick={() => setMenuOpen((v) => !v)}>
+                  <IconMore size={14} />
+                </button>
+                {menuOpen && (
+                  <>
+                    <div className="dn-menu-scrim" onClick={() => setMenuOpen(false)} aria-hidden />
+                    <div className="dn-menu" role="menu">
+                      <button className="dn-menu-item" onClick={() => { setMenuOpen(false); setShowRename(true); }}>
+                        Rename notebook
+                      </button>
+                      <button className="dn-menu-item dn-menu-item-danger" onClick={() => { setMenuOpen(false); setShowDelete(true); }}>
+                        Delete notebook
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
@@ -323,6 +349,34 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
       />
 
       {toast && <div className="dn-toast" role="status">{toast}</div>}
+
+      {showRename && notebook && (
+        <NameModal
+          title="Rename notebook"
+          label="Notebook title"
+          initial={notebook.title}
+          cta="Save"
+          onSubmit={async (title) => {
+            const nb = await updateNotebook(notebookId, { title });
+            setNotebook(nb);
+            setShowRename(false);
+          }}
+          onClose={() => setShowRename(false)}
+        />
+      )}
+      {showDelete && (
+        <ConfirmModal
+          title="Delete notebook?"
+          body="This permanently deletes the notebook and all its sources, chats, and notes. This can't be undone."
+          cta="Delete"
+          danger
+          onConfirm={async () => {
+            await deleteNotebook(notebookId);
+            router.push("/");
+          }}
+          onClose={() => setShowDelete(false)}
+        />
+      )}
     </div>
   );
 }
@@ -355,7 +409,6 @@ function SourcesPanel({
         <div className="dn-col-title">
           Sources <span className="dn-col-count">{sources.length}</span>
         </div>
-        <button className="dn-icon-btn" title="More"><IconMore size={14} /></button>
       </div>
 
       <input

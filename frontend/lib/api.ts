@@ -38,6 +38,8 @@ export const createNotebook = (title: string) =>
   req<Notebook>("/notebooks", { method: "POST", body: JSON.stringify({ title }) });
 export const deleteNotebook = (id: string) =>
   req<void>(`/notebooks/${id}`, { method: "DELETE" });
+export const updateNotebook = (id: string, patch: { title?: string; snippet?: string }) =>
+  req<Notebook>(`/notebooks/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 
 export const listSources = (notebookId: string) =>
   req<Source[]>(`/notebooks/${notebookId}/sources`);

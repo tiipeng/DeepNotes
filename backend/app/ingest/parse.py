@@ -218,6 +218,43 @@ def parse_youtube(url: str) -> ParsedDoc:
     return parse_markdown_sections("".join(parts), title=title)
 
 
+@lru_cache(maxsize=1)
+def _whisper_model():
+    from faster_whisper import WhisperModel
+
+    from ..config import get_settings
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    compute = "float16" if device == "cuda" else "int8"
+    return WhisperModel(get_settings().whisper_model, device=device, compute_type=compute)
+
+
+def parse_audio(path: str) -> ParsedDoc:
+    """Transcribe an audio file with Whisper and ingest like any source. Transcript is
+    grouped into ~30s blocks headed by their timestamp so citations point into the audio."""
+    segments, _info = _whisper_model().transcribe(path, vad_filter=True)
+    parts: list[str] = []
+    block: list[str] = []
+    block_start: float | None = None
+    for seg in segments:
+        text = (seg.text or "").strip()
+        if not text:
+            continue
+        if block_start is None:
+            block_start = seg.start
+        if seg.start - block_start >= 30 and block:
+            parts.append(f"## [{_fmt_ts(block_start)}]\n\n{' '.join(block)}\n\n")
+            block = []
+            block_start = seg.start
+        block.append(text)
+    if block:
+        parts.append(f"## [{_fmt_ts(block_start or 0)}]\n\n{' '.join(block)}\n\n")
+    md = "".join(parts)
+    if not md.strip():
+        raise ValueError("No speech detected in the audio.")
+    return parse_markdown_sections(md)
+
+
 def parse_url(url: str) -> ParsedDoc:
     """Robust article extraction: main content only (nav/ads/boilerplate stripped),
     headings preserved as markdown sections for citation metadata."""

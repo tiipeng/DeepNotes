@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..db import SessionLocal, get_db
 from ..ingest.parse import (
     is_youtube,
+    parse_audio,
     parse_document,
     parse_plain_text,
     parse_url,
@@ -27,11 +28,13 @@ router = APIRouter(tags=["sources"])
 
 # Free-tier limits (ULTRAPLAN §9)
 MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_AUDIO_BYTES = 50 * 1024 * 1024  # audio files run larger; transcription is the bottleneck, not size
 MAX_SOURCES = 10
 MAX_PAGES_TOTAL = 200
 EXT_KIND = {
     ".pdf": "pdf", ".txt": "txt", ".md": "txt",
     ".docx": "docx", ".pptx": "pptx", ".xlsx": "xlsx", ".html": "url",
+    ".mp3": "audio", ".wav": "audio", ".m4a": "audio",
 }
 
 
@@ -78,6 +81,8 @@ def _process_source(
                 parsed = parse_xlsx(tmp_path)
             elif kind == "url":
                 parsed = parse_youtube(url) if is_youtube(url) else parse_url(url)
+            elif kind == "audio":
+                parsed = parse_audio(tmp_path)
             else:
                 parsed = parse_document(tmp_path)
 
@@ -133,9 +138,10 @@ async def add_source(
         if ext not in EXT_KIND:
             raise HTTPException(400, f"Unsupported file type {ext!r}")
         data = await file.read()
-        if len(data) > MAX_FILE_BYTES:
-            raise HTTPException(400, f"File exceeds {MAX_FILE_BYTES // (1024*1024)} MB limit")
         kind = EXT_KIND[ext]
+        limit = MAX_AUDIO_BYTES if kind == "audio" else MAX_FILE_BYTES
+        if len(data) > limit:
+            raise HTTPException(400, f"File exceeds {limit // (1024*1024)} MB limit")
         src_title = title or Path(file.filename).stem
         if kind == "txt":
             plain_text = data.decode("utf-8", errors="replace")

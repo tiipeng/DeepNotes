@@ -31,6 +31,7 @@ class SourceRead(BaseModel):
     year: int | None = None
     pages: int | None = None
     status: str
+    error_msg: str | None = None
     checked: bool
     char_count: int
     created_at: datetime
@@ -80,6 +81,7 @@ class ChatRequest(BaseModel):
     question: str
     # If omitted, the backend uses all checked + ready sources in the notebook.
     source_ids: list[str] | None = None
+    thread_id: str = "default"
 
 
 class CitationOut(BaseModel):
@@ -114,6 +116,13 @@ class ChatResponse(BaseModel):
     table_result: TableResult | None = None
 
 
+class ThreadRead(BaseModel):
+    thread_id: str
+    title: str
+    message_count: int
+    updated_at: datetime
+
+
 class MessageRead(BaseModel):
     id: str
     role: str
@@ -121,6 +130,31 @@ class MessageRead(BaseModel):
     created_at: datetime
     citations: list[CitationOut] = []
     table_result: TableResult | None = None
+
+
+class NoteCreate(BaseModel):
+    title: str
+    body: str = ""
+    tag: str | None = None
+    source_id: str | None = None
+
+
+class NoteRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    notebook_id: str
+    title: str
+    body: str
+    tag: str | None = None
+    source_id: str | None = None
+    created_at: datetime
+
+
+class NotebookSummaryRead(BaseModel):
+    summary: str
+    suggested_questions: list[str] = []
+    ready: bool  # whether the notebook has any ready sources to ground a summary
 
 
 class HealthRead(BaseModel):

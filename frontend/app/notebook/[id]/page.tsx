@@ -2,26 +2,36 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  addUrlSource,
+  createNote,
+  deleteNote,
   getMessages,
   getNotebook,
+  getNotebookSummary,
   getPassage,
+  listNotes,
   listSources,
-  sendChat,
+  listThreads,
   setSourceChecked,
+  streamChat,
   uploadSource,
 } from "@/lib/api";
 import type {
   Citation,
   Message,
+  Note,
   Notebook,
+  NotebookOverview,
   Passage,
   Source,
   TableResult,
+  Thread,
 } from "@/lib/types";
+
+const stripMarkers = (s: string) => s.replace(/\s*\[\d+\]/g, "");
 import { TopBar } from "@/components/TopBar";
 import {
   IconAttach,
-  IconBookmark,
   IconCheck,
   IconChevronRight,
   IconClose,
@@ -35,37 +45,128 @@ import {
   IconPlay,
   IconPlus,
   IconQuote,
-  IconRefresh,
   IconSend,
   IconSparkle,
 } from "@/components/icons";
-
-const SUGGESTED = [
-  "Summarize the strongest evidence across these sources",
-  "What are the key findings and their effect sizes?",
-  "What questions do the sources leave open?",
-];
 
 export default function NotebookPage({ params }: { params: { id: string } }) {
   const notebookId = params.id;
   const [notebook, setNotebook] = useState<Notebook | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [pending, setPending] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
   const [openCite, setOpenCite] = useState<Citation | null>(null);
   const [passage, setPassage] = useState<Passage | null>(null);
+  const [overview, setOverview] = useState<NotebookOverview | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+  const [threadId, setThreadId] = useState("default");
+  const [threads, setThreads] = useState<Thread[]>([]);
+
+  const flash = useCallback((msg: string) => {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 2600);
+  }, []);
 
   const loadSources = useCallback(async () => {
     setSources(await listSources(notebookId));
+  }, [notebookId]);
+  const loadNotes = useCallback(async () => {
+    setNotes(await listNotes(notebookId));
+  }, [notebookId]);
+  const loadThreads = useCallback(async () => {
+    setThreads(await listThreads(notebookId));
   }, [notebookId]);
 
   useEffect(() => {
     getNotebook(notebookId).then(setNotebook).catch(() => {});
     loadSources().catch(() => {});
-    getMessages(notebookId).then(setMessages).catch(() => {});
-  }, [notebookId, loadSources]);
+    loadNotes().catch(() => {});
+    loadThreads().catch(() => {});
+  }, [notebookId, loadSources, loadNotes, loadThreads]);
+
+  // Load the active thread's messages whenever the thread changes.
+  useEffect(() => {
+    getMessages(notebookId, threadId).then(setMessages).catch(() => setMessages([]));
+  }, [notebookId, threadId]);
+
+  // While anything is still parsing, poll until it resolves (ready or error).
+  const anyParsing = sources.some((s) => s.status === "parsing" && !s.id.startsWith("tmp-"));
+  useEffect(() => {
+    if (!anyParsing) return;
+    const t = window.setInterval(() => loadSources().catch(() => {}), 3000);
+    return () => window.clearInterval(t);
+  }, [anyParsing, loadSources]);
+
+  const newThread = () => {
+    if (streaming !== null) return;
+    setChatError(null);
+    setMessages([]);
+    setThreadId(crypto.randomUUID());
+  };
+  const switchThread = (tid: string) => {
+    if (streaming !== null || tid === threadId) return;
+    setChatError(null);
+    setThreadId(tid);
+  };
+
+  const saveNote = useCallback(
+    async (data: { title: string; body: string; tag?: string; source_id?: string }) => {
+      try {
+        await createNote(notebookId, data);
+        await loadNotes();
+        flash("Saved to notes");
+      } catch {
+        flash("Couldn't save note");
+      }
+    },
+    [notebookId, loadNotes, flash],
+  );
+
+  const onDeleteNote = useCallback(
+    async (id: string) => {
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+      try {
+        await deleteNote(id);
+      } catch {
+        loadNotes();
+      }
+    },
+    [loadNotes],
+  );
+
+  const saveAnswerNote = (m: Message) => {
+    const body = stripMarkers(m.text).trim();
+    const title = body.split(/(?<=[.?!])\s/)[0].slice(0, 80) || "Answer";
+    saveNote({ title, body, tag: "answer" });
+  };
+  const savePassageNote = (c: Citation) => {
+    saveNote({
+      title: c.source_title,
+      body: stripMarkers(c.snippet).trim(),
+      tag: "quote",
+      source_id: c.source_id,
+    });
+  };
 
   const checkedReady = sources.filter((s) => s.checked && s.status === "ready");
+  const readyCount = sources.filter((s) => s.status === "ready").length;
+
+  // Overview regenerates only when the set of ready sources changes (backend caches
+  // by fingerprint, so unchanged sets are a cheap no-op).
+  useEffect(() => {
+    if (readyCount === 0) {
+      setOverview({ summary: "", suggested_questions: [], ready: false });
+      return;
+    }
+    setOverviewLoading(true);
+    getNotebookSummary(notebookId)
+      .then(setOverview)
+      .catch(() => setOverview(null))
+      .finally(() => setOverviewLoading(false));
+  }, [notebookId, readyCount]);
 
   const onToggle = async (s: Source) => {
     setSources((prev) =>
@@ -75,28 +176,70 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   };
 
   const onUpload = async (file: File) => {
+    const tmpId = `tmp-${Date.now()}`;
     const tmp: Source = {
-      id: `tmp-${Date.now()}`, notebook_id: notebookId, kind: "pdf",
+      id: tmpId, notebook_id: notebookId, kind: "pdf",
       title: file.name, authors: null, venue: null, year: null, pages: null,
-      status: "parsing", checked: true, char_count: 0, created_at: new Date().toISOString(),
+      status: "parsing", error_msg: null, checked: true, char_count: 0,
+      created_at: new Date().toISOString(),
     };
     setSources((prev) => [...prev, tmp]);
     try {
       await uploadSource(notebookId, file);
-    } finally {
       await loadSources();
+    } catch (e) {
+      setSources((prev) => prev.filter((s) => s.id !== tmpId));
+      await loadSources(); // a failed parse may still leave an error row
+      flash(e instanceof Error ? e.message : "Upload failed");
+    }
+  };
+
+  const onAddUrl = async (url: string) => {
+    const tmpId = `tmp-${Date.now()}`;
+    const tmp: Source = {
+      id: tmpId, notebook_id: notebookId, kind: "url",
+      title: url, authors: null, venue: null, year: null, pages: null,
+      status: "parsing", error_msg: null, checked: true, char_count: 0,
+      created_at: new Date().toISOString(),
+    };
+    setSources((prev) => [...prev, tmp]);
+    try {
+      await addUrlSource(notebookId, url);
+      await loadSources();
+    } catch (e) {
+      setSources((prev) => prev.filter((s) => s.id !== tmpId));
+      await loadSources();
+      flash(e instanceof Error ? e.message : "Couldn't add link");
     }
   };
 
   const ask = async (question: string) => {
-    if (!question.trim() || pending) return;
-    setPending(question.trim());
-    try {
-      await sendChat(notebookId, question.trim());
-      setMessages(await getMessages(notebookId));
-    } finally {
-      setPending(null);
-    }
+    const q = question.trim();
+    if (!q || streaming !== null) return;
+    setChatError(null);
+    setStreaming("");
+    const userMsg: Message = {
+      id: `u-${Date.now()}`, role: "user", text: q,
+      created_at: new Date().toISOString(), citations: [], table_result: null,
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    await streamChat(notebookId, q, threadId, {
+      onToken: (d) => setStreaming((prev) => (prev ?? "") + d),
+      onDone: (done) => {
+        const asst: Message = {
+          id: done.message_id, role: "assistant", text: done.answer_markdown,
+          created_at: new Date().toISOString(),
+          citations: done.citations, table_result: done.table_result,
+        };
+        setMessages((prev) => [...prev, asst]);
+        setStreaming(null);
+        loadThreads().catch(() => {}); // surface a brand-new thread in the switcher
+      },
+      onError: (detail) => {
+        setChatError(detail);
+        setStreaming(null);
+      },
+    });
   };
 
   const onCite = async (c: Citation) => {
@@ -135,16 +278,25 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               checkedCount={checkedReady.length}
               onToggle={onToggle}
               onUpload={onUpload}
+              onAddUrl={onAddUrl}
             />
             <ChatPanel
               messages={messages}
-              pending={pending}
+              streaming={streaming}
+              chatError={chatError}
               sourceCount={checkedReady.length}
+              overview={overview}
+              overviewLoading={overviewLoading}
+              threads={threads}
+              threadId={threadId}
+              onNewThread={newThread}
+              onSwitchThread={switchThread}
               openCite={openCite}
               onCite={onCite}
               onAsk={ask}
+              onSaveNote={saveAnswerNote}
             />
-            <StudioPanel />
+            <StudioPanel notes={notes} onDeleteNote={onDeleteNote} />
           </div>
         </div>
       </main>
@@ -152,25 +304,40 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
       <CitationDrawer
         cite={openCite}
         passage={passage}
+        onSave={savePassageNote}
         onClose={() => {
           setOpenCite(null);
           setPassage(null);
         }}
       />
+
+      {toast && <div className="dn-toast" role="status">{toast}</div>}
     </div>
   );
 }
 
 /* ---------------- Sources ---------------- */
 function SourcesPanel({
-  sources, checkedCount, onToggle, onUpload,
+  sources, checkedCount, onToggle, onUpload, onAddUrl,
 }: {
   sources: Source[];
   checkedCount: number;
   onToggle: (s: Source) => void;
   onUpload: (f: File) => void;
+  onAddUrl: (url: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [showLink, setShowLink] = useState(false);
+  const [urlVal, setUrlVal] = useState("");
+
+  const submitUrl = () => {
+    const u = urlVal.trim();
+    if (!/^https?:\/\//i.test(u)) return;
+    onAddUrl(u);
+    setUrlVal("");
+    setShowLink(false);
+  };
+
   return (
     <aside className="dn-col">
       <div className="dn-col-head">
@@ -184,7 +351,7 @@ function SourcesPanel({
         ref={fileRef}
         type="file"
         hidden
-        accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,.html"
+        accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,.html,.mp3,.wav,.m4a"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) onUpload(f);
@@ -194,6 +361,25 @@ function SourcesPanel({
       <button className="dn-add-source" onClick={() => fileRef.current?.click()}>
         <IconPlus size={14} /> <span>Add source</span>
       </button>
+
+      <button className="dn-add-link" onClick={() => setShowLink((v) => !v)}>
+        <IconLink size={13} /> <span>Add a web page or YouTube link</span>
+      </button>
+      {showLink && (
+        <div className="dn-link-row">
+          <input
+            className="dn-link-input"
+            placeholder="https://…"
+            value={urlVal}
+            autoFocus
+            onChange={(e) => setUrlVal(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submitUrl()}
+          />
+          <button className="dn-btn dn-btn-primary dn-btn-tight" onClick={submitUrl} disabled={!/^https?:\/\//i.test(urlVal.trim())}>
+            Add
+          </button>
+        </div>
+      )}
 
       <div className="dn-source-actions">
         <span>Include in chat</span>
@@ -219,8 +405,14 @@ function SourcesPanel({
               <span className="dn-source-body">
                 <span className="dn-source-title">{s.title}</span>
                 <span className="dn-source-meta">
-                  {s.status !== "ready" ? (
-                    <span className={`dn-source-status is-${s.status}`}>{s.status}</span>
+                  {s.status === "parsing" ? (
+                    <span className="dn-source-status is-parsing">
+                      <span className="dn-spin" aria-hidden /> processing…
+                    </span>
+                  ) : s.status === "error" ? (
+                    <span className="dn-source-status is-error" title={s.error_msg ?? undefined}>
+                      couldn&apos;t process
+                    </span>
                   ) : (
                     <>
                       {s.pages ? <span className="dn-mono">{s.pages}p</span> : null}
@@ -229,6 +421,9 @@ function SourcesPanel({
                     </>
                   )}
                 </span>
+                {s.status === "error" && s.error_msg && (
+                  <span className="dn-source-errmsg">{s.error_msg}</span>
+                )}
               </span>
             </button>
           </li>
@@ -250,40 +445,49 @@ function SourcesPanel({
 
 /* ---------------- Chat ---------------- */
 function ChatPanel({
-  messages, pending, sourceCount, openCite, onCite, onAsk,
+  messages, streaming, chatError, sourceCount, overview, overviewLoading,
+  threads, threadId, onNewThread, onSwitchThread, openCite, onCite, onAsk, onSaveNote,
 }: {
   messages: Message[];
-  pending: string | null;
+  streaming: string | null;
+  chatError: string | null;
   sourceCount: number;
+  overview: NotebookOverview | null;
+  overviewLoading: boolean;
+  threads: Thread[];
+  threadId: string;
+  onNewThread: () => void;
+  onSwitchThread: (tid: string) => void;
   openCite: Citation | null;
   onCite: (c: Citation) => void;
   onAsk: (q: string) => void;
+  onSaveNote: (m: Message) => void;
 }) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const busy = streaming !== null;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, pending]);
+  }, [messages, streaming, chatError]);
 
   const submit = () => {
     onAsk(input);
     setInput("");
   };
 
-  const empty = messages.length === 0 && !pending;
+  const empty = messages.length === 0 && !busy && !chatError;
 
   return (
     <section className="dn-col dn-col-chat">
       <div className="dn-col-head">
-        <div className="dn-col-title">
-          Chat <span className="dn-col-count">{messages.filter((m) => m.role === "user").length}</span>
-        </div>
-        <div className="dn-chat-head-actions">
-          <button className="dn-btn dn-btn-ghost dn-btn-tight">
-            <IconRefresh size={12} /> New thread
-          </button>
-        </div>
+        <ThreadBar
+          threads={threads}
+          threadId={threadId}
+          busy={busy}
+          onSwitch={onSwitchThread}
+          onNew={onNewThread}
+        />
       </div>
 
       <div className="dn-chat-scroll" ref={scrollRef}>
@@ -294,22 +498,51 @@ function ChatPanel({
               <span className="dn-empty-stripe" />
               <span className="dn-empty-stripe" />
             </div>
-            <h2 className="dn-empty-title">Ask anything across your sources.</h2>
-            <p className="dn-empty-sub">
-              Answers are grounded in the {sourceCount} source{sourceCount === 1 ? "" : "s"} you&apos;ve
-              included. Every claim links back to the exact passage it came from.
-            </p>
-            <div className="dn-suggest">
-              <div className="dn-suggest-label">Try one of these</div>
-              <div className="dn-suggest-list">
-                {SUGGESTED.map((q) => (
-                  <button key={q} className="dn-suggest-item" onClick={() => onAsk(q)}>
-                    <span className="dn-suggest-q">{q}</span>
-                    <IconChevronRight size={14} />
-                  </button>
-                ))}
-              </div>
-            </div>
+            {overview?.ready ? (
+              <>
+                <h2 className="dn-empty-title">Ask anything across your sources.</h2>
+                {overview.summary && <p className="dn-empty-sub">{overview.summary}</p>}
+                {overview.suggested_questions.length > 0 && (
+                  <div className="dn-suggest">
+                    <div className="dn-suggest-label">Suggested questions</div>
+                    <div className="dn-suggest-list">
+                      {overview.suggested_questions.map((q) => (
+                        <button
+                          key={q}
+                          className="dn-suggest-item"
+                          onClick={() => onAsk(q)}
+                          disabled={sourceCount === 0}
+                        >
+                          <span className="dn-suggest-q">{q}</span>
+                          <IconChevronRight size={14} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : overviewLoading ? (
+              <>
+                <h2 className="dn-empty-title">Reading your sources…</h2>
+                <p className="dn-empty-sub">
+                  Building an overview and a few good questions to get you started.
+                </p>
+                <div className="dn-suggest-list" aria-hidden>
+                  <div className="dn-skel dn-skel-line" />
+                  <div className="dn-skel dn-skel-line" />
+                  <div className="dn-skel dn-skel-line" style={{ width: "70%" }} />
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="dn-empty-title">Add a source to begin.</h2>
+                <p className="dn-empty-sub">
+                  Upload a PDF, document, or spreadsheet on the left. Once it&apos;s indexed,
+                  you&apos;ll get a grounded overview and can ask anything — with every claim
+                  linked to the exact passage it came from.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="dn-thread">
@@ -319,20 +552,15 @@ function ChatPanel({
                   <div className="dn-msg-bubble">{m.text}</div>
                 </div>
               ) : (
-                <AssistantMessage key={m.id} m={m} openCite={openCite} onCite={onCite} />
+                <AssistantMessage key={m.id} m={m} openCite={openCite} onCite={onCite} onSaveNote={onSaveNote} />
               ),
             )}
-            {pending && (
-              <>
-                <div className="dn-msg-user">
-                  <div className="dn-msg-bubble">{pending}</div>
-                </div>
-                <div className="dn-msg-assistant">
-                  <span className="dn-thinking">
-                    <IconSparkle size={13} /> Searching your sources…
-                  </span>
-                </div>
-              </>
+            {busy && <StreamingMessage text={streaming ?? ""} />}
+            {chatError && (
+              <div className="dn-chat-error" role="alert">
+                <IconClose size={13} />
+                <span>{chatError}</span>
+              </div>
             )}
           </div>
         )}
@@ -343,14 +571,26 @@ function ChatPanel({
           <button className="dn-composer-attach" title="Attach"><IconAttach size={15} /></button>
           <input
             className="dn-composer-input"
-            placeholder="Ask a question about your sources…"
+            placeholder={
+              sourceCount === 0
+                ? "Add a source to start asking…"
+                : busy
+                  ? "Answering…"
+                  : "Ask a question about your sources…"
+            }
             value={input}
+            disabled={busy || sourceCount === 0}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
           />
           <div className="dn-composer-r">
             <span className="dn-composer-scope">{sourceCount} sources</span>
-            <button className="dn-composer-send" title="Send" onClick={submit} disabled={!input.trim() || !!pending}>
+            <button
+              className="dn-composer-send"
+              title="Send"
+              onClick={submit}
+              disabled={!input.trim() || busy || sourceCount === 0}
+            >
               <IconSend size={14} />
             </button>
           </div>
@@ -363,12 +603,88 @@ function ChatPanel({
   );
 }
 
+function ThreadBar({
+  threads, threadId, busy, onSwitch, onNew,
+}: {
+  threads: Thread[];
+  threadId: string;
+  busy: boolean;
+  onSwitch: (tid: string) => void;
+  onNew: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = threads.find((t) => t.thread_id === threadId);
+  const label = current ? current.title : "New thread";
+  return (
+    <>
+      <div className="dn-threadbar">
+        <div className="dn-thread-select">
+          <button
+            className="dn-thread-current"
+            onClick={() => setOpen((v) => !v)}
+            title="Switch thread"
+          >
+            <IconNote size={13} />
+            <span className="dn-thread-current-label">{label}</span>
+            <span className={`dn-thread-caret ${open ? "is-open" : ""}`}><IconChevronRight size={12} /></span>
+          </button>
+          {open && (
+            <div className="dn-thread-menu">
+              {threads.length === 0 && (
+                <div className="dn-thread-empty">No threads yet</div>
+              )}
+              {threads.map((t) => (
+                <button
+                  key={t.thread_id}
+                  className={`dn-thread-item ${t.thread_id === threadId ? "is-active" : ""}`}
+                  onClick={() => { onSwitch(t.thread_id); setOpen(false); }}
+                >
+                  <span className="dn-thread-item-title">{t.title}</span>
+                  <span className="dn-thread-item-count">{t.message_count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <button className="dn-btn dn-btn-ghost dn-btn-tight" onClick={onNew} disabled={busy}>
+          <IconPlus size={12} /> New thread
+        </button>
+      </div>
+      {open && <div className="dn-thread-scrim" onClick={() => setOpen(false)} aria-hidden />}
+    </>
+  );
+}
+
+function StreamingMessage({ text }: { text: string }) {
+  return (
+    <div className="dn-msg-assistant">
+      <div className="dn-msg-byline">
+        <span className="dn-assistant-mark" aria-hidden><IconSparkle size={12} /></span>
+        <span className="dn-msg-byline-text">
+          {text ? "Answering from your sources" : "Searching your sources…"}
+        </span>
+      </div>
+      {text ? (
+        <div className="dn-answer">
+          {text}
+          <span className="dn-stream-cursor" aria-hidden />
+        </div>
+      ) : (
+        <span className="dn-thinking">
+          <span className="dn-stream-dots"><i /><i /><i /></span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 function AssistantMessage({
-  m, openCite, onCite,
+  m, openCite, onCite, onSaveNote,
 }: {
   m: Message;
   openCite: Citation | null;
   onCite: (c: Citation) => void;
+  onSaveNote: (m: Message) => void;
 }) {
   const byId = new Map(m.citations.map((c) => [c.display_index, c]));
   const grounded = m.citations.length > 0;
@@ -419,10 +735,15 @@ function AssistantMessage({
 
       {(grounded || table) && (
         <div className="dn-msg-tools">
-          <button className="dn-tool"><IconCopy size={13} /> Copy</button>
-          <button className="dn-tool"><IconQuote size={13} /> Save as note</button>
-          <button className="dn-tool"><IconBookmark size={13} /> Pin</button>
-          <button className="dn-tool dn-tool-r"><IconRefresh size={13} /> Rerun</button>
+          <button
+            className="dn-tool"
+            onClick={() => navigator.clipboard?.writeText(stripMarkers(m.text))}
+          >
+            <IconCopy size={13} /> Copy
+          </button>
+          <button className="dn-tool" onClick={() => onSaveNote(m)}>
+            <IconQuote size={13} /> Save as note
+          </button>
         </div>
       )}
     </div>
@@ -488,33 +809,66 @@ function TableCard({ table }: { table: TableResult }) {
 }
 
 /* ---------------- Studio ---------------- */
-function StudioPanel() {
+function StudioPanel({
+  notes, onDeleteNote,
+}: {
+  notes: Note[];
+  onDeleteNote: (id: string) => void;
+}) {
   return (
     <aside className="dn-col">
       <div className="dn-col-head">
-        <div className="dn-col-title">Studio</div>
-        <button className="dn-icon-btn"><IconMore size={14} /></button>
+        <div className="dn-col-title">
+          Studio <span className="dn-col-count">{notes.length}</span>
+        </div>
       </div>
       <div className="dn-studio-section">
         <div className="dn-studio-h"><IconMic size={13} /> <span>Audio overview</span></div>
-        <button className="dn-audio-cta">
+        <div className="dn-audio-cta is-soon" aria-disabled>
           <span className="dn-audio-cta-mark"><IconSparkle size={15} /></span>
           <span className="dn-audio-cta-body">
-            <span className="dn-audio-cta-title">Generate audio overview</span>
-            <span className="dn-audio-cta-sub">A two-host conversation through your sources · ~12 min</span>
+            <span className="dn-audio-cta-title">
+              Audio overview <span className="dn-soon-badge">Soon</span>
+            </span>
+            <span className="dn-audio-cta-sub">A two-host conversation through your sources</span>
           </span>
-        </button>
+        </div>
       </div>
-      <div className="dn-studio-section">
-        <div className="dn-studio-h">
-          <IconNote size={13} /> <span>Notes</span>
-          <button className="dn-studio-h-add"><IconPlus size={12} /></button>
-        </div>
-        <div className="dn-studio-empty">
-          Saved snippets and answers will appear here.
-        </div>
+      <div className="dn-studio-section dn-studio-notes">
+        <div className="dn-studio-h"><IconNote size={13} /> <span>Notes</span></div>
+        {notes.length === 0 ? (
+          <div className="dn-studio-empty">
+            Save an answer or a cited passage and it&apos;ll be kept here.
+          </div>
+        ) : (
+          <div className="dn-notes">
+            {notes.map((n) => (
+              <NoteCard key={n.id} note={n} onDelete={() => onDeleteNote(n.id)} />
+            ))}
+          </div>
+        )}
       </div>
     </aside>
+  );
+}
+
+function NoteCard({ note, onDelete }: { note: Note; onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
+  const date = new Date(note.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return (
+    <div className="dn-note">
+      {note.tag && <span className="dn-note-tag">{note.tag}</span>}
+      <button className="dn-note-title-btn" onClick={() => setOpen((v) => !v)}>
+        <span className="dn-note-title">{note.title}</span>
+      </button>
+      <p className={`dn-note-body ${open ? "" : "dn-note-body-clamp"}`}>{note.body}</p>
+      <div className="dn-note-foot">
+        <span>{date}</span>
+        <button className="dn-note-del" onClick={onDelete} title="Delete note">
+          <IconClose size={12} /> Delete
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -524,10 +878,11 @@ function cleanLine(s: string) {
 }
 
 function CitationDrawer({
-  cite, passage, onClose,
+  cite, passage, onSave, onClose,
 }: {
   cite: Citation | null;
   passage: Passage | null;
+  onSave: (c: Citation) => void;
   onClose: () => void;
 }) {
   const open = !!cite;
@@ -569,7 +924,13 @@ function CitationDrawer({
                 </div>
               </div>
               <div className="dn-cd-head-r">
-                <button className="dn-icon-btn" title="Copy passage"><IconCopy size={14} /></button>
+                <button
+                  className="dn-icon-btn"
+                  title="Copy passage"
+                  onClick={() => navigator.clipboard?.writeText(cleanLine(cite.snippet))}
+                >
+                  <IconCopy size={14} />
+                </button>
                 <button className="dn-icon-btn dn-cd-close" title="Close" onClick={onClose}>
                   <IconClose size={14} />
                 </button>
@@ -608,10 +969,9 @@ function CitationDrawer({
 
             <footer className="dn-cd-foot">
               <div className="dn-cd-foot-l">
-                <span className="dn-mono">⌘ ↵</span>
-                <span>Insert passage as quoted note</span>
+                <span>Keep this passage in your notebook&apos;s notes</span>
               </div>
-              <button className="dn-btn dn-btn-primary dn-btn-tight">
+              <button className="dn-btn dn-btn-primary dn-btn-tight" onClick={() => onSave(cite)}>
                 <IconQuote size={13} /> Save as note
               </button>
             </footer>

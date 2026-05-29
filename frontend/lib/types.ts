@@ -22,6 +22,7 @@ export interface Source {
   year: number | null;
   pages: number | null;
   status: string;
+  error_msg: string | null;
   checked: boolean;
   char_count: number;
   created_at: string;
@@ -78,6 +79,29 @@ export interface Passage {
   pre: string;
   highlight: string;
   post: string;
+}
+
+export interface Thread {
+  thread_id: string;
+  title: string;
+  message_count: number;
+  updated_at: string;
+}
+
+export interface Note {
+  id: string;
+  notebook_id: string;
+  title: string;
+  body: string;
+  tag: string | null;
+  source_id: string | null;
+  created_at: string;
+}
+
+export interface NotebookOverview {
+  summary: string;
+  suggested_questions: string[];
+  ready: boolean;
 }
 
 export interface Health {

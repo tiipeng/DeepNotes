@@ -1,27 +1,40 @@
+import logging
 import os
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from ..db import get_db
-from ..ingest.parse import parse_document, parse_plain_text, resolve_at
+from ..db import SessionLocal, get_db
+from ..ingest.parse import (
+    is_youtube,
+    parse_audio,
+    parse_document,
+    parse_plain_text,
+    parse_url,
+    parse_youtube,
+    resolve_at,
+)
 from ..ingest.pipeline import ingest_source
 from ..models import Chunk, Notebook, Source
 from ..schemas import PassageRead, SourceContent, SourcePatch, SourceRead
 from ..spreadsheet.store import drop_tables, ingest_tables, parse_xlsx
 from ..stores.chroma import delete_source as chroma_delete_source
 
+log = logging.getLogger("deepnotes.ingest")
+
 router = APIRouter(tags=["sources"])
 
 # Free-tier limits (ULTRAPLAN §9)
 MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_AUDIO_BYTES = 50 * 1024 * 1024  # audio files run larger; transcription is the bottleneck, not size
 MAX_SOURCES = 10
 MAX_PAGES_TOTAL = 200
 EXT_KIND = {
     ".pdf": "pdf", ".txt": "txt", ".md": "txt",
     ".docx": "docx", ".pptx": "pptx", ".xlsx": "xlsx", ".html": "url",
+    ".mp3": "audio", ".wav": "audio", ".m4a": "audio",
 }
 
 
@@ -45,9 +58,66 @@ def list_sources(notebook_id: str, db: Session = Depends(get_db)):
     return [SourceRead.model_validate(s) for s in sorted(nb.sources, key=lambda x: x.created_at)]
 
 
+def _process_source(
+    source_id: str,
+    *,
+    tmp_path: str | None,
+    url: str | None,
+    plain_text: str | None,
+    kind: str,
+) -> None:
+    """Parse + chunk + embed off the event loop. Runs in a worker thread (scheduled
+    via BackgroundTasks) with its own DB session, so a long Docling parse never blocks
+    other requests. Moves the source parsing -> ready (or -> error with a reason)."""
+    db = SessionLocal()
+    try:
+        source = db.get(Source, source_id)
+        if source is None:
+            return
+        try:
+            if plain_text is not None:
+                parsed = parse_plain_text(plain_text)
+            elif kind == "xlsx":
+                parsed = parse_xlsx(tmp_path)
+            elif kind == "url":
+                parsed = parse_youtube(url) if is_youtube(url) else parse_url(url)
+            elif kind == "audio":
+                parsed = parse_audio(tmp_path)
+            else:
+                parsed = parse_document(tmp_path)
+
+            existing_pages = sum(
+                s.pages or 0 for s in source.notebook.sources if s.id != source.id
+            )
+            if existing_pages + (parsed.num_pages or 0) > MAX_PAGES_TOTAL:
+                source.status = "error"
+                source.error_msg = f"Would exceed the {MAX_PAGES_TOTAL}-page total budget"
+                db.commit()
+                return
+
+            # Use a better title discovered during parsing (e.g. article title) when the
+            # user didn't provide one (current title is still the raw URL).
+            if parsed.title and source.title == url:
+                source.title = parsed.title[:200]
+
+            ingest_source(db, source, parsed)  # sets status -> ready on success
+            if kind == "xlsx":
+                ingest_tables(db, source, tmp_path)  # structured tables for SQL reasoning
+        except Exception as e:
+            log.warning("ingestion failed for source %s: %s", source_id, e)
+            source.status = "error"
+            source.error_msg = str(e)[:500]  # raw cause kept here; never sent verbatim to clients
+            db.commit()
+    finally:
+        db.close()
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)  # discard original — keep only parsed markdown + vectors
+
+
 @router.post("/notebooks/{notebook_id}/sources", response_model=SourceRead, status_code=201)
 async def add_source(
     notebook_id: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile | None = File(default=None),
     url: str | None = Form(default=None),
     title: str | None = Form(default=None),
@@ -62,14 +132,16 @@ async def add_source(
     tmp_path: str | None = None
     plain_text: str | None = None
 
+    # Fast, synchronous validation only (cheap). Heavy parse/embed is deferred below.
     if file:
         ext = Path(file.filename or "").suffix.lower()
         if ext not in EXT_KIND:
             raise HTTPException(400, f"Unsupported file type {ext!r}")
         data = await file.read()
-        if len(data) > MAX_FILE_BYTES:
-            raise HTTPException(400, f"File exceeds {MAX_FILE_BYTES // (1024*1024)} MB limit")
         kind = EXT_KIND[ext]
+        limit = MAX_AUDIO_BYTES if kind == "audio" else MAX_FILE_BYTES
+        if len(data) > limit:
+            raise HTTPException(400, f"File exceeds {limit // (1024*1024)} MB limit")
         src_title = title or Path(file.filename).stem
         if kind == "txt":
             plain_text = data.decode("utf-8", errors="replace")
@@ -86,35 +158,16 @@ async def add_source(
     db.commit()
     db.refresh(source)
 
-    try:
-        if plain_text is not None:
-            parsed = parse_plain_text(plain_text)
-        elif kind == "xlsx":
-            parsed = parse_xlsx(tmp_path)
-        else:
-            parsed = parse_document(tmp_path or url)
-
-        existing_pages = sum(s.pages or 0 for s in nb.sources if s.id != source.id)
-        if existing_pages + (parsed.num_pages or 0) > MAX_PAGES_TOTAL:
-            raise HTTPException(400, f"Would exceed the {MAX_PAGES_TOTAL}-page total budget")
-
-        ingest_source(db, source, parsed)
-        if kind == "xlsx":
-            ingest_tables(db, source, tmp_path)  # structured tables for SQL reasoning
-    except HTTPException:
-        source.status = "error"
-        db.commit()
-        raise
-    except Exception as e:
-        source.status = "error"
-        source.error_msg = str(e)[:500]
-        db.commit()
-        raise HTTPException(500, f"Ingestion failed: {e}")
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.remove(tmp_path)  # discard original — keep only parsed markdown + vectors
-
-    db.refresh(source)
+    # Defer parsing + embedding to a worker thread; respond immediately with the
+    # 'parsing' row. The client polls until it flips to ready/error.
+    background_tasks.add_task(
+        _process_source,
+        source.id,
+        tmp_path=tmp_path,
+        url=url,
+        plain_text=plain_text,
+        kind=kind,
+    )
     return SourceRead.model_validate(source)
 
 

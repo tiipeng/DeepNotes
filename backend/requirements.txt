@@ -12,6 +12,7 @@ sqlalchemy
 
 # Parsing + RAG (the OSS heavy-lifting)
 docling
+rapidocr-onnxruntime   # OCR fallback for scanned/image-only PDFs (portable, CPU/Linux)
 llama-index-core
 llama-index-llms-google-genai
 llama-index-embeddings-google-genai
@@ -19,6 +20,11 @@ llama-index-embeddings-google-genai
 # Vector store
 chromadb
 llama-index-vector-stores-chroma
+
+# Web + media sources (flow through the same parse->chunk->embed pipeline)
+trafilatura            # robust web-article main-content extraction
+youtube-transcript-api # YouTube transcript ingestion
+faster-whisper         # local audio transcription (CTranslate2; CPU/CUDA)
 
 # Spreadsheet reasoning (XLSX differentiator)
 duckdb

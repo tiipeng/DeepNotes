@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     ollama_llm_model: str = "llama3.1"
     ollama_embed_model: str = "nomic-embed-text"
 
+    # Audio transcription (faster-whisper). "base" balances speed/quality on CPU.
+    whisper_model: str = "base"
+
     database_url: str = "sqlite:///./deepnotes.db"
     chroma_dir: str = "./chroma"
     tables_path: str = "./tables.duckdb"  # DuckDB file for XLSX spreadsheet reasoning

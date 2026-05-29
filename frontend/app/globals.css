@@ -380,6 +380,12 @@ body {
 .dn-stream-dots i:nth-child(3) { animation-delay: 0.3s; }
 @keyframes dn-bounce { 0%, 60%, 100% { transform: translateY(0); background: var(--accent-soft-2); } 30% { transform: translateY(-4px); background: var(--accent); } }
 
+/* Skeleton (summary loading) */
+.dn-skel { background: linear-gradient(90deg, var(--bg-2) 0%, var(--bg-3) 50%, var(--bg-2) 100%); background-size: 200% 100%; border-radius: var(--r-sm); animation: dn-shimmer 1.4s ease-in-out infinite; }
+.dn-skel-line { height: 44px; border-radius: var(--r-md); }
+@keyframes dn-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.dn-suggest-item:disabled { opacity: 0.5; cursor: default; }
+
 /* Inline chat error */
 .dn-chat-error { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--r-md); background: rgba(184, 92, 56, 0.08); border: 1px solid rgba(184, 92, 56, 0.24); color: #8f4527; font-size: 13px; }
 .dn-chat-error svg { flex-shrink: 0; }

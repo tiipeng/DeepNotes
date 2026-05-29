@@ -80,6 +80,12 @@ export interface Passage {
   post: string;
 }
 
+export interface NotebookOverview {
+  summary: string;
+  suggested_questions: string[];
+  ready: boolean;
+}
+
 export interface Health {
   status: string;
   provider: string;

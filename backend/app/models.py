@@ -141,6 +141,21 @@ class Note(Base):
     notebook: Mapped["Notebook"] = relationship(back_populates="notes")
 
 
+class NotebookSummary(Base):
+    """Cached notebook overview + suggested starter questions. Regenerated when the
+    source set changes (tracked via `fingerprint`)."""
+
+    __tablename__ = "notebook_summaries"
+
+    notebook_id: Mapped[str] = mapped_column(
+        ForeignKey("notebooks.id", ondelete="CASCADE"), primary_key=True
+    )
+    fingerprint: Mapped[str] = mapped_column(String, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    questions_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class TableData(Base):
     """XLSX differentiator — structured table rows for real spreadsheet reasoning."""
 

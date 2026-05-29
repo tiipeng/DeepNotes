@@ -124,6 +124,12 @@ class MessageRead(BaseModel):
     table_result: TableResult | None = None
 
 
+class NotebookSummaryRead(BaseModel):
+    summary: str
+    suggested_questions: list[str] = []
+    ready: bool  # whether the notebook has any ready sources to ground a summary
+
+
 class HealthRead(BaseModel):
     status: str
     provider: str

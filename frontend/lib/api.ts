@@ -4,6 +4,7 @@ import type {
   Health,
   Message,
   Notebook,
+  NotebookOverview,
   Passage,
   Source,
   TableResult,
@@ -25,6 +26,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const getHealth = () => req<Health>("/health");
 export const listNotebooks = () => req<Notebook[]>("/notebooks");
 export const getNotebook = (id: string) => req<Notebook>(`/notebooks/${id}`);
+export const getNotebookSummary = (id: string) =>
+  req<NotebookOverview>(`/notebooks/${id}/summary`);
 export const createNotebook = (title: string) =>
   req<Notebook>("/notebooks", { method: "POST", body: JSON.stringify({ title }) });
 export const deleteNotebook = (id: string) =>

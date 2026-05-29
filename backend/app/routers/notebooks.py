@@ -1,10 +1,18 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Notebook
-from ..schemas import NotebookCreate, NotebookRead, NotebookUpdate
+from ..models import Notebook, NotebookSummary
+from ..rag.summary import fingerprint, generate_summary
+from ..schemas import (
+    NotebookCreate,
+    NotebookRead,
+    NotebookSummaryRead,
+    NotebookUpdate,
+)
 
 router = APIRouter(prefix="/notebooks", tags=["notebooks"])
 
@@ -74,6 +82,42 @@ def update_notebook(
     db.commit()
     db.refresh(nb)
     return _to_read(nb)
+
+
+@router.get("/{notebook_id}/summary", response_model=NotebookSummaryRead)
+def notebook_summary(notebook_id: str, db: Session = Depends(get_db)):
+    """A short, grounded overview + 3 suggested starter questions. Cached and
+    regenerated only when the notebook's source set changes."""
+    nb = _get_or_404(db, notebook_id)
+    ready = [s for s in nb.sources if s.status == "ready"]
+    if not ready:
+        return NotebookSummaryRead(summary="", suggested_questions=[], ready=False)
+
+    fp = fingerprint(ready)
+    cached = db.get(NotebookSummary, notebook_id)
+    if cached and cached.fingerprint == fp and cached.summary:
+        return NotebookSummaryRead(
+            summary=cached.summary,
+            suggested_questions=json.loads(cached.questions_json),
+            ready=True,
+        )
+
+    summary, questions = generate_summary(ready)
+    if cached:
+        cached.fingerprint = fp
+        cached.summary = summary
+        cached.questions_json = json.dumps(questions)
+    else:
+        db.add(
+            NotebookSummary(
+                notebook_id=notebook_id,
+                fingerprint=fp,
+                summary=summary,
+                questions_json=json.dumps(questions),
+            )
+        )
+    db.commit()
+    return NotebookSummaryRead(summary=summary, suggested_questions=questions, ready=True)
 
 
 @router.delete("/{notebook_id}", status_code=204)

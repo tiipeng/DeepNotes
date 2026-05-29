@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getMessages,
   getNotebook,
+  getNotebookSummary,
   getPassage,
   listSources,
   setSourceChecked,
@@ -14,6 +15,7 @@ import type {
   Citation,
   Message,
   Notebook,
+  NotebookOverview,
   Passage,
   Source,
   TableResult,
@@ -40,12 +42,6 @@ import {
   IconSparkle,
 } from "@/components/icons";
 
-const SUGGESTED = [
-  "Summarize the strongest evidence across these sources",
-  "What are the key findings and their effect sizes?",
-  "What questions do the sources leave open?",
-];
-
 export default function NotebookPage({ params }: { params: { id: string } }) {
   const notebookId = params.id;
   const [notebook, setNotebook] = useState<Notebook | null>(null);
@@ -55,6 +51,8 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const [chatError, setChatError] = useState<string | null>(null);
   const [openCite, setOpenCite] = useState<Citation | null>(null);
   const [passage, setPassage] = useState<Passage | null>(null);
+  const [overview, setOverview] = useState<NotebookOverview | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
 
   const loadSources = useCallback(async () => {
     setSources(await listSources(notebookId));
@@ -67,6 +65,21 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   }, [notebookId, loadSources]);
 
   const checkedReady = sources.filter((s) => s.checked && s.status === "ready");
+  const readyCount = sources.filter((s) => s.status === "ready").length;
+
+  // Overview regenerates only when the set of ready sources changes (backend caches
+  // by fingerprint, so unchanged sets are a cheap no-op).
+  useEffect(() => {
+    if (readyCount === 0) {
+      setOverview({ summary: "", suggested_questions: [], ready: false });
+      return;
+    }
+    setOverviewLoading(true);
+    getNotebookSummary(notebookId)
+      .then(setOverview)
+      .catch(() => setOverview(null))
+      .finally(() => setOverviewLoading(false));
+  }, [notebookId, readyCount]);
 
   const onToggle = async (s: Source) => {
     setSources((prev) =>
@@ -159,6 +172,8 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               streaming={streaming}
               chatError={chatError}
               sourceCount={checkedReady.length}
+              overview={overview}
+              overviewLoading={overviewLoading}
               openCite={openCite}
               onCite={onCite}
               onAsk={ask}
@@ -269,12 +284,14 @@ function SourcesPanel({
 
 /* ---------------- Chat ---------------- */
 function ChatPanel({
-  messages, streaming, chatError, sourceCount, openCite, onCite, onAsk,
+  messages, streaming, chatError, sourceCount, overview, overviewLoading, openCite, onCite, onAsk,
 }: {
   messages: Message[];
   streaming: string | null;
   chatError: string | null;
   sourceCount: number;
+  overview: NotebookOverview | null;
+  overviewLoading: boolean;
   openCite: Citation | null;
   onCite: (c: Citation) => void;
   onAsk: (q: string) => void;
@@ -315,22 +332,51 @@ function ChatPanel({
               <span className="dn-empty-stripe" />
               <span className="dn-empty-stripe" />
             </div>
-            <h2 className="dn-empty-title">Ask anything across your sources.</h2>
-            <p className="dn-empty-sub">
-              Answers are grounded in the {sourceCount} source{sourceCount === 1 ? "" : "s"} you&apos;ve
-              included. Every claim links back to the exact passage it came from.
-            </p>
-            <div className="dn-suggest">
-              <div className="dn-suggest-label">Try one of these</div>
-              <div className="dn-suggest-list">
-                {SUGGESTED.map((q) => (
-                  <button key={q} className="dn-suggest-item" onClick={() => onAsk(q)}>
-                    <span className="dn-suggest-q">{q}</span>
-                    <IconChevronRight size={14} />
-                  </button>
-                ))}
-              </div>
-            </div>
+            {overview?.ready ? (
+              <>
+                <h2 className="dn-empty-title">Ask anything across your sources.</h2>
+                {overview.summary && <p className="dn-empty-sub">{overview.summary}</p>}
+                {overview.suggested_questions.length > 0 && (
+                  <div className="dn-suggest">
+                    <div className="dn-suggest-label">Suggested questions</div>
+                    <div className="dn-suggest-list">
+                      {overview.suggested_questions.map((q) => (
+                        <button
+                          key={q}
+                          className="dn-suggest-item"
+                          onClick={() => onAsk(q)}
+                          disabled={sourceCount === 0}
+                        >
+                          <span className="dn-suggest-q">{q}</span>
+                          <IconChevronRight size={14} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : overviewLoading ? (
+              <>
+                <h2 className="dn-empty-title">Reading your sources…</h2>
+                <p className="dn-empty-sub">
+                  Building an overview and a few good questions to get you started.
+                </p>
+                <div className="dn-suggest-list" aria-hidden>
+                  <div className="dn-skel dn-skel-line" />
+                  <div className="dn-skel dn-skel-line" />
+                  <div className="dn-skel dn-skel-line" style={{ width: "70%" }} />
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="dn-empty-title">Add a source to begin.</h2>
+                <p className="dn-empty-sub">
+                  Upload a PDF, document, or spreadsheet on the left. Once it&apos;s indexed,
+                  you&apos;ll get a grounded overview and can ask anything — with every claim
+                  linked to the exact passage it came from.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="dn-thread">

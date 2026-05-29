@@ -1,162 +1,303 @@
 # DeepNotes
 
-A self-hosted, data-sovereign **"chat with your sources"** workspace — a NotebookLM-style
-tool where the AI answers **only** from your uploaded documents, and **every claim links
-back, clickably, to the exact passage it came from.**
-
-The signature interaction: ask a question → get a grounded answer with inline `⟦n⟧`
-citations → click one → a reading pane slides in with the cited sentence **highlighted and
-scrolled into view**. If the answer isn't in your sources, it says so — it never falls back
-on the model's own knowledge.
-
-Built thin on open source: the custom code is UI, citation-offset glue, and wiring;
-everything heavy (parsing, chunking, retrieval, citations) is delegated to libraries.
+A self-hosted, source-grounded research notebook — a NotebookLM-style tool that chats **only**
+with the documents you give it. Every answer is grounded in your own uploaded sources, and every
+claim links back to the **exact passage** it came from: click a citation and a reading pane opens
+the source with the cited sentence highlighted. If the answer isn't in your sources, DeepNotes
+says so instead of guessing. Originals are discarded after parsing, the whole stack runs on your
+own hardware, and the model provider is swappable (hosted Gemini by default, or a fully-local
+Ollama path), so your documents never have to leave a machine you control.
 
 ---
 
-## What it does
+## 1. Features
 
-- **Notebooks** — create many; each owns its own sources.
-- **Sources** — upload PDF / TXT / DOCX / PPTX / XLSX (or add a URL); toggle which are
-  in scope for chat. Originals are discarded after parsing — only parsed markdown +
-  embeddings + metadata are kept.
-- **Grounded chat** — retrieval over the selected sources → answer with inline `[n]`
-  citations → strict "not found" when the sources don't cover it.
-- **Click-to-source** — citations resolve to the **exact** passage (page + section
-  accurate), highlighted in a reading drawer.
-- **Spreadsheet reasoning** *(differentiator)* — XLSX is queried as real structured data
-  via SQL, not flattened text.
-- **Local/sovereign mode** *(differentiator)* — run fully on your own hardware via Ollama;
-  no data leaves the server.
+**Notebooks & sources**
+- Create many notebooks; each owns its own set of sources, scoped independently.
+- Toggle which sources are "in chat" — unchecking a source removes it from **both** the
+  retrieval and the spreadsheet-query paths.
+- Supported source types (all flow through the same parse → chunk → embed → cite pipeline):
 
----
+  | Type | How it's ingested |
+  |---|---|
+  | **PDF** (text or **scanned/image-only**) | Docling; OCR fallback (RapidOCR) only when a page has no text layer |
+  | **DOCX, PPTX** | Docling |
+  | **TXT, Markdown** | read directly |
+  | **XLSX** | each sheet → a queryable table (see *Spreadsheet reasoning*) + a markdown rendering for retrieval |
+  | **Web page** (by URL) | main-article extraction via trafilatura (nav/ads stripped, headings kept) |
+  | **YouTube** (by URL) | transcript pulled and grouped into timestamped blocks |
+  | **Audio** (`.mp3 / .wav / .m4a`) | transcribed locally with Whisper (faster-whisper) |
 
-## Architecture
+- Limits (per notebook): **10 MB** per file (**50 MB** for audio), **10 sources**, **~200 pages** total.
 
-```
-┌──────────────────────────────────────┐        ┌────────────────────────────────────────────┐
-│ FRONTEND — Next.js 14 (App Router, TS) │  HTTP  │ BACKEND — Python + FastAPI                    │
-│ Tailwind · DeepNotes design tokens     │ <────> │ (the OSS heavy-lifting lives here)            │
-│                                         │  JSON  │                                              │
-│  • Dashboard (notebook grid)            │        │  Docling      → parse PDF/DOCX/PPTX/XLSX/URL  │
-│  • Notebook (Sources · Chat · Studio)   │        │  LlamaIndex   → CitationQueryEngine (RAG)     │
-│  • Citation drawer (highlight + scroll) │        │  Chroma       → vector store                  │
-└──────────────────────────────────────┘        │  SQLite       → notebooks/sources/chunks/…    │
-   Deploy: Vercel or local                        │  DuckDB       → XLSX text-to-SQL reasoning     │
-                                                   │  Provider abstraction → Gemini | Ollama       │
-                                                   └────────────────────────────────────────────┘
-                                                      Deploy: container (HF Spaces / Render / …)
-                                                      NOTE: can't run on Vercel functions (250MB/10s)
-```
+**Grounded chat with verifiable citations**
+- Answers are generated strictly from the in-scope sources. When retrieval finds nothing
+  relevant, a factual question returns *"I couldn't find an answer to that in your sources."* —
+  it does not fall back on the model's own knowledge.
+- Citations are clickable. The drawer opens the source with the cited span highlighted and
+  scrolled into view, plus the surrounding context:
+  - **Documents (PDF/DOCX/PPTX/web):** resolved to a page and/or section heading.
+  - **YouTube / audio:** resolved to a timestamp (`[mm:ss]`).
+  - **Spreadsheets:** resolved to the **exact source rows** behind a computed figure.
 
-### The citation pipeline (the heart of the product)
+**Spreadsheet reasoning (differentiator)**
+- XLSX sheets become real tables in DuckDB. A factual question is turned into a read-only SQL
+  query (text-to-SQL), executed, and phrased back in natural language with the result table and
+  the SQL shown.
+- Citations are **row-level**: a second "evidence" query identifies the source rows behind the
+  number, and the citation opens the drawer on exactly those rows (e.g. the 12 rows a regional
+  `SUM` aggregates over).
+- The SQL engine is sandboxed (see *Design decisions*), so it cannot read host files.
 
-```
-upload → Docling parse (markdown + aligned page/section index)
-       → chunk (offsets preserved) → embed → Chroma (chunk.id == vector id) + SQLite metadata
+**Intent routing**
+Each message is classified (a cheap LLM call, with a greeting fast-path) and routed:
+- **factual** — strict grounded retrieval; spreadsheet reasoning runs first when the notebook has
+  tables; for mixed notebooks a table figure and document prose are merged into one cited answer.
+  This is the only path that can return the "not found" refusal.
+- **synthesis** ("summarize", "overview", "main points") — broad retrieval across the sources;
+  never refuses.
+- **meta** ("what can I ask", "give me an example prompt") — suggests prompts grounded in what the
+  sources actually contain.
+- **conversational** ("hello", "thanks") — a brief, friendly reply; no retrieval, no refusal.
 
-ask    → retrieve top-k over CHECKED sources → CitationQueryEngine → answer with [n]
-       → each [n] resolved to an exact span via locate_span:
-            exact substring → whitespace-normalized → parent-chunk fallback (never nothing)
-       → page + section resolved per-offset (chunk-size independent)
-
-click  → /sources/{id}/passage slices parsed_markdown into pre/highlight/post
-       → drawer highlights the cited sentence and scrolls it to center
-```
-
----
-
-## The 5 challenges → open-source solution
-
-| Challenge | Solution | Custom code |
-|---|---|---|
-| **Citations / grounding** | LlamaIndex `CitationQueryEngine` + `locate_span` offset resolver | offset glue + drawer |
-| **Document parsing** | Docling (PDF, DOCX, PPTX, XLSX, HTML, OCR → markdown w/ provenance) | none |
-| **Chunking** | LlamaIndex `SentenceSplitter` (char offsets retained) | page/section span index |
-| **Spreadsheet reasoning** | DuckDB + LLM text-to-SQL | routing + result UI |
-| **Scope discipline** | thin vertical slices, one risk proven at a time | the build plan |
-
----
-
-## Tech stack
-
-**Frontend:** Next.js 14 · TypeScript · Tailwind · Geist / Newsreader / JetBrains Mono.
-**Backend:** Python 3.12 · FastAPI · SQLAlchemy (SQLite) · Docling · LlamaIndex · Chroma · DuckDB.
-**Models:** Gemini `gemini-2.5-flash` + `gemini-embedding-001` (default), behind a provider
-abstraction so a local **Ollama** model swaps in via config.
+**Experience**
+- **Streaming** answers (token-by-token over SSE); citation chips and follow-up suggestions attach
+  once the answer completes.
+- **Persistent overview** — a grounded summary of the notebook, always visible at the top of the
+  chat (cached; regenerated when the source set changes).
+- **Suggested questions** — grounded starter questions up front, and 2–3 contextual follow-ups
+  after each answer.
+- **Notes** — save an answer or a cited passage into the notebook.
+- **Threads** — multiple conversations per notebook, isolated and switchable.
+- **Answers follow the question's language** (e.g. a German question gets a German answer);
+  citations and source content are unchanged.
 
 ---
 
-## Setup
+## 2. How to use it
 
-**Prerequisites:** Python 3.12, Node 18+ (pnpm), and a [Gemini API key](https://aistudio.google.com/apikey)
-(free tier). [`uv`](https://github.com/astral-sh/uv) recommended for the Python env.
+1. **Create a notebook** from the dashboard.
+2. **Add sources** — upload a file (PDF, DOCX, PPTX, TXT, XLSX, audio) or paste a web/YouTube URL.
+   Each source shows a "processing…" state while it parses in the background, then flips to ready.
+3. **Read the overview** that appears at the top, and click a suggested starter question — or type
+   your own.
+4. **Ask questions.** The answer streams in with inline `⟦n⟧` citations.
+5. **Click a citation** to open the source drawer with the exact passage highlighted (page/section
+   for documents, timestamp for audio/video, the source rows for spreadsheets).
+6. **Save notes**, follow up with the suggested questions, or **start a new thread** for a separate
+   line of inquiry. Uncheck a source to exclude it from answers.
 
-### Backend
+---
 
+## 3. Running it locally
+
+### Prerequisites
+- **Python 3.12**, **Node 18+** with **pnpm**
+- A **Gemini API key** (free tier) — <https://aistudio.google.com/apikey>.
+  ([`uv`](https://github.com/astral-sh/uv) recommended for the Python env.)
+- No system packages required: OCR (RapidOCR/onnxruntime), audio decoding (PyAV), and Whisper
+  (CTranslate2) are pip-installed; models download on first use.
+
+### Backend (FastAPI, port 8000)
 ```bash
 cd backend
 uv venv --python 3.12 .venv && source .venv/bin/activate
-uv pip install -r requirements.txt
-cp .env.example .env          # then put your GEMINI_API_KEY in .env
+uv pip install -r requirements.txt          # or: pip install -r requirements.txt
+cp .env.example .env                         # then put your GEMINI_API_KEY in .env
 uvicorn app.main:app --reload --port 8000
 ```
 Health check: `curl localhost:8000/health`
 
-### Frontend
+**Environment variables** (`backend/.env` — see `.env.example`, no real values committed):
 
+| Key | Purpose | Default |
+|---|---|---|
+| `LLM_PROVIDER` | `gemini` (hosted) or `ollama` (local) | `gemini` |
+| `GEMINI_API_KEY` | **required** when provider is gemini | — |
+| `GEMINI_LLM_MODEL` / `GEMINI_EMBED_MODEL` | model names | `gemini-2.5-flash` / `gemini-embedding-001` |
+| `OLLAMA_BASE_URL` / `OLLAMA_LLM_MODEL` / `OLLAMA_EMBED_MODEL` | used only when provider is ollama | `http://localhost:11434` / `llama3.1` / `nomic-embed-text` |
+| `DATABASE_URL` | SQLite metadata DB | `sqlite:///./deepnotes.db` |
+| `CHROMA_DIR` | Chroma vector store dir | `./chroma` |
+| `TABLES_PATH` | DuckDB file for XLSX tables | `./tables.duckdb` |
+| `CORS_ORIGINS` | comma-separated allowed origins | `http://localhost:3000` |
+
+### Frontend (Next.js, port 3000)
 ```bash
 cd frontend
 pnpm install
 echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
-pnpm dev                       # http://localhost:3000
+pnpm dev                                      # http://localhost:3000
 ```
 
-Open `http://localhost:3000`, create a notebook, add a couple of PDFs, and ask away.
-
-> First backend run downloads Docling's layout models (one-time). On Apple Silicon the
-> parser auto-selects CPU (MPS lacks float64); on a CUDA box it auto-selects the GPU.
-
----
-
-## Differentiators
-
-### 1. Spreadsheet reasoning
-Upload an `.xlsx` and ask aggregation/filtering questions ("which region had the highest
-revenue?", "total units of X"). Each sheet becomes a DuckDB table; the LLM generates a
-**read-only** SQL query, it runs, and you get the computed answer plus the result table and
-the SQL. Real `GROUP BY/SUM`, not flattened text — a concrete NotebookLM weakness.
-
-### 2. Sovereignty / local mode
-Run everything — parsing, embeddings, retrieval, LLM — on your own hardware via Ollama, so
-no data leaves the server (GDPR / public-sector / air-gapped). Same grounded-citation
-experience. See **[docs/LOCAL_MODE.md](docs/LOCAL_MODE.md)**.
+### First-run notes
+- The **first PDF parse** downloads Docling's layout models (one-time).
+- The **first scanned PDF** downloads RapidOCR models; the **first audio file** downloads the
+  Whisper model (`base`, ~140 MB).
+- On Apple Silicon the parser runs on CPU (MPS is deliberately avoided — it lacks the float64 the
+  layout model needs); on a CUDA box it uses the GPU automatically.
 
 ---
 
-## Limits (free-tier friendly)
+## 4. Architecture
 
-- Max file size **10 MB**; max **10 sources** per notebook; ~**200 pages** total.
-- Ingestion is serial with retry/backoff (respects free-tier rate limits).
-- Originals discarded after parsing — only markdown + embeddings + metadata retained.
+```
+┌─────────────────────────────┐         ┌──────────────────────────────────────────────┐
+│ FRONTEND — Next.js 14 (TS)   │  HTTP   │ BACKEND — Python · FastAPI                     │
+│ App Router · Tailwind        │ <─────> │                                                │
+│  • Dashboard (notebooks)     │  JSON   │  Ingestion (background threadpool)             │
+│  • Notebook: Sources/Chat/   │  + SSE  │    Docling · RapidOCR · trafilatura ·          │
+│    Studio                    │ stream  │    youtube-transcript-api · faster-whisper     │
+│  • Citation drawer           │         │  RAG: LlamaIndex CitationQueryEngine           │
+└─────────────────────────────┘         │  Spreadsheet: DuckDB text-to-SQL (sandboxed)   │
+   Deploy: Vercel or any host            │  Provider: Gemini (default) | Ollama           │
+                                         │                                                │
+                                         │   SQLite (metadata)   Chroma (vectors)         │
+                                         │   DuckDB (XLSX tables)                          │
+                                         └──────────────────────────────────────────────┘
+                                            Deploy: a container (cannot run on serverless
+                                            functions — Docling/torch/Whisper are too heavy)
+```
+
+### Why two services
+The frontend is a thin Next.js app. The backend is a separate FastAPI service because the
+heavy lifting — Docling parsing (with a torch layout model), OCR, Whisper transcription,
+embeddings, and the vector store — exceeds typical serverless function limits (size and
+execution time). Keeping it a standalone container also makes the data-sovereignty story real:
+the whole pipeline can run on hardware you control.
+
+### Ingestion pipeline
+```
+source → parse → chunk → embed → store
+```
+- **parse** — dispatched by type: Docling for PDF/DOCX/PPTX (OCR fallback only when a paged doc
+  comes back with essentially no text), trafilatura for web, youtube-transcript-api for YouTube,
+  faster-whisper for audio, pandas/openpyxl for XLSX. Every parser emits **one canonical markdown
+  document plus an aligned span index** (`[start, end, page, section]`), so a character offset
+  always resolves to a page/section (or a timestamp/sheet for AV/spreadsheets). This shared
+  coordinate system is what makes citations work *identically* across every source type.
+- **chunk** — LlamaIndex `SentenceSplitter` (512 tokens, 64 overlap); each chunk keeps its char
+  offsets + page/section.
+- **embed & store** — vectors go to Chroma (chunk id == vector id); chunk metadata goes to SQLite.
+- Ingestion runs on a **background worker** (FastAPI `BackgroundTasks` → threadpool), so a long
+  parse/transcription never blocks the API event loop; the source row moves `parsing → ready`
+  (or `error` with a reason) and the UI polls for it.
+
+### Citation mechanism
+Retrieval and answering use LlamaIndex's `CitationQueryEngine`, which cites at ~sentence
+granularity (48-token citation units). Because those sub-chunks don't carry reliable per-chunk
+offsets, each cited snippet is **relocated** against the source markdown via a fixed fallback
+chain (`rag/locate.py`):
+
+1. exact substring match →
+2. whitespace-normalized match (mapped back to original offsets) →
+3. the parent chunk's span (so the drawer never shows nothing).
+
+The page and section are then resolved from the **cited offset itself** (not the parent chunk's
+start), so they're accurate regardless of chunk size. The drawer slices the markdown into
+pre / highlight / post (~700 chars of context each side). Source-internal reference markers (a
+document's own `[12]`/`[4, 9]`) are stripped so only real DeepNotes citations render as chips.
+
+For **spreadsheets**, citations don't use that text chain: a `__rowid__` column plus an LLM
+"evidence" query map a computed figure back to the exact source rows, and the drawer highlights
+those rows.
+
+### Storage — what's kept, what's discarded
+- **SQLite** — durable metadata: notebooks, sources, chunks (with offsets/page/section),
+  messages, citations, notes, cached notebook summaries, and table_data (XLSX sheet → DuckDB
+  table mapping).
+- **Chroma** — the embedding vectors.
+- **DuckDB** — the actual XLSX table data for SQL reasoning.
+- **Original uploaded files are discarded after parsing** — only the parsed markdown, embeddings,
+  and metadata are retained. SQLite/Chroma split keeps relational metadata queryable while
+  delegating vector search to a purpose-built store.
+
+### Provider abstraction
+A small provider interface returns LlamaIndex-compatible LLM + embedding objects, so the RAG and
+spreadsheet layers are identical regardless of backend. `LLM_PROVIDER=gemini` (default) uses
+hosted Gemini; `LLM_PROVIDER=ollama` routes everything — generation **and** embeddings — to a
+local Ollama daemon for fully-local operation (requires Ollama running with the configured models
+pulled).
+
+### Key tables (high level)
+`notebooks` · `sources` · `chunks` · `messages` · `citations` · `notes` · `notebook_summaries`
+· `table_data`.
 
 ---
 
-## How I'd scale this
+## 5. Tech stack
 
-The current build is deliberately simple (local SQLite + Chroma, synchronous ingest). The
-architecture is shaped so the obvious next steps don't require rewrites:
+- **Frontend:** TypeScript, Next.js 14 (App Router), Tailwind CSS.
+- **Backend:** Python 3.12, FastAPI, SQLAlchemy.
+- **Parsing / ingestion:** Docling (PDF/DOCX/PPTX), RapidOCR (onnxruntime) for scanned PDFs,
+  trafilatura (web), youtube-transcript-api, faster-whisper (CTranslate2) for audio,
+  pandas/openpyxl (XLSX).
+- **RAG / retrieval:** LlamaIndex (`CitationQueryEngine`, `SentenceSplitter`), Chroma vector store.
+- **Spreadsheet reasoning:** DuckDB (text-to-SQL).
+- **Models:** Gemini `gemini-2.5-flash` + `gemini-embedding-001` (default), behind a provider
+  abstraction that also supports local Ollama.
 
-- **Async ingestion** — move upload→parse→embed off the request path into a worker queue
-  (Celery / Cloud Tasks); the `status: parsing→ready` field is already in the model.
-- **Managed vector + metadata stores** — Chroma → pgvector / Qdrant / Pinecone; SQLite →
-  Postgres. The provider-abstraction pattern generalizes to a vector-store abstraction.
-- **Multi-tenancy** — add org/user scoping + auth + row-level security; retrieval already
-  filters by source/notebook metadata.
-- **Cost & privacy routing** — the provider abstraction already lets you route per
-  tenant: premium cloud models for some, fully-local Ollama for sensitive data.
-- **UX** — stream chat responses; cache embeddings; the per-citation resolution path is
-  already instrumented (`deepnotes.citations` logger) for observability.
+---
+
+## 6. Design decisions & trade-offs
+
+- **OSS-first.** Parsing, chunking, retrieval, and citation are delegated to mature libraries
+  (Docling, LlamaIndex, Chroma, DuckDB); the custom code is the citation-offset glue, the
+  per-type extractors, the intent router, and the UI — not a reinvented RAG stack.
+- **One coordinate system for citations.** Building a single markdown + span index per source
+  (rather than per-type special cases) is what lets click-to-highlight work the same for a PDF, a
+  web page, a YouTube transcript, and a spreadsheet.
+- **Per-offset page/section resolution.** Page and section come from the cited sentence's offset,
+  not the parent chunk — so citations stay accurate even with large chunks.
+- **DuckDB sandbox for text-to-SQL.** The LLM-generated query runs on a connection opened with
+  `enable_external_access=false` + `lock_configuration=true`, so file-reading SQL functions
+  (`read_text`, `read_csv`, `glob`, `ATTACH`) are blocked and the setting can't be re-enabled
+  mid-query. The `SELECT`/`WITH` prefix check is only a coarse first filter; the sandbox is the
+  real guard.
+- **Local-default storage.** SQLite + Chroma + DuckDB on local files keep the dev/self-host path
+  trivial; the storage layer is intentionally swappable later.
+- **Strict grounding.** The "not found" refusal is reserved exclusively for the factual path;
+  conversational/meta/synthesis never show it, so the product feels like an assistant without
+  weakening the grounding guarantee.
+
+---
+
+## 7. Limitations & known issues
+
+This is a working prototype, not a hardened product. Honestly:
+
+- **Single-user, no auth.** There is no authentication, no user accounts, and no multi-tenancy —
+  every notebook is visible to anyone who can reach the API. Do not expose it publicly as-is.
+- **Not hardened for scale.** SQLite + local Chroma + a single DuckDB file are fine for one user;
+  concurrent ingestion of two XLSX files can contend on the DuckDB write lock, and there is no
+  job queue beyond in-process background tasks.
+- **No automated tests / CI yet.**
+- **Free-tier model limits.** With hosted Gemini, heavy use can hit rate limits; ingestion has
+  retry/backoff on embeddings but chat does not.
+- **Synthesis answers can over-cite.** "Summarize" / broad questions may attach many citation
+  chips (sparse-citation tuning is applied to the factual path, not yet to synthesis).
+- **Cross-source merge is heuristic.** Mixed table+prose questions work by computing the table
+  part and merging it with retrieved prose; very complex multi-table comparisons may not fully
+  combine.
+- **Web-page *file* uploads aren't wired** — add web pages by **URL** (an uploaded `.html` file is
+  not supported).
+- **Historical messages aren't retro-cleaned** — the source-internal reference stripping applies
+  to new answers; messages generated before it remain as stored.
+- **"Audio Overview" (podcast) is a placeholder** ("Soon") in the Studio panel — not implemented.
+- The local **Ollama** path is implemented via the provider abstraction but is exercised far less
+  than the default Gemini path.
+
+---
+
+## 8. Roadmap
+
+The path from prototype to product:
+
+- **Auth & multi-tenancy** — user accounts and per-notebook ownership.
+- **Hosted deployment** — containerized backend + managed stores (e.g. Postgres + pgvector), a
+  real ingestion queue, and observability.
+- **Audio Overview** — the deferred two-host "podcast" generation.
+- **Full local mode** — harden and validate the Ollama provider for fully air-gapped use.
+- **Tests & CI** — coverage for the citation/offset logic and the SQL sandbox, run in CI.
 
 ---
 
@@ -166,28 +307,16 @@ architecture is shaped so the obvious next steps don't require rewrites:
 backend/
   app/
     main.py · config.py · db.py · models.py · schemas.py
-    providers/   gemini · ollama · factory   (LLM/embedding abstraction)
-    ingest/      parse (docling) · pipeline (chunk→embed→store)
-    rag/         engine (CitationQueryEngine) · locate (offset resolver)
-    spreadsheet/ store (xlsx→duckdb) · engine (text-to-SQL)
+    providers/   gemini · ollama · factory        (LLM/embedding abstraction)
+    ingest/      parse (Docling/OCR/web/YouTube/audio) · pipeline (chunk→embed→store)
+    rag/         engine (CitationQueryEngine, streaming) · locate (offset resolver)
+                 · assist (intent router) · summary (overview)
+    spreadsheet/ store (xlsx→duckdb) · engine (text-to-SQL, row citations)
     stores/      chroma
-    routers/     notebooks · sources · chat
-  spike.py · make_test_pdf.py · make_test_xlsx.py   (Phase-0 spike + test data)
+    routers/     notebooks · sources · chat · notes
 frontend/
-  app/           (dashboard) · notebook/[id] · globals.css (design tokens)
+  app/           dashboard · notebook/[id] · globals.css (design tokens)
   components/     TopBar · icons
   lib/            api client · types
-docs/            ULTRAPLAN.md · LOCAL_MODE.md · BUILD_PROMPT.md · DESIGN_PROMPT.md · PLAN.md
+docs/            planning + audit notes (DUE_DILIGENCE · SECURITY_VERIFICATION · QA_REPORT · …)
 ```
-
----
-
-## Status
-
-Built and verified: grounded chat with click-to-exact-passage citations, ingestion with
-preserved page/section metadata, spreadsheet reasoning, and local/sovereign mode. Deferred
-(stretch): audio overview, notes, auto-summaries. See **[docs/ULTRAPLAN.md](docs/ULTRAPLAN.md)**
-for the full plan and the phase-by-phase record.
-
-The UI implements the **DeepNotes** design (warm-cream + forest editorial aesthetic);
-design tokens are ported verbatim from the design handoff into the Tailwind theme.

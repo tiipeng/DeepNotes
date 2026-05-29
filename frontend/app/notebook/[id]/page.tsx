@@ -191,23 +191,26 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
     await setSourceChecked(s.id, !s.checked).catch(loadSources);
   };
 
-  const onUpload = async (file: File) => {
-    const tmpId = `tmp-${Date.now()}`;
-    const tmp: Source = {
-      id: tmpId, notebook_id: notebookId, kind: "pdf",
-      title: file.name, authors: null, venue: null, year: null, pages: null,
-      status: "parsing", error_msg: null, checked: true, char_count: 0,
-      created_at: new Date().toISOString(),
-    };
-    setSources((prev) => [...prev, tmp]);
-    try {
-      await uploadSource(notebookId, file);
-      await loadSources();
-    } catch (e) {
-      setSources((prev) => prev.filter((s) => s.id !== tmpId));
-      await loadSources(); // a failed parse may still leave an error row
-      flash(e instanceof Error ? e.message : "Upload failed");
+  const onUpload = async (files: File[]) => {
+    // Each upload returns immediately (parsing happens on the background worker), so we
+    // can submit them serially and let the poll flip each parsing -> ready.
+    for (const file of files) {
+      const tmpId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const tmp: Source = {
+        id: tmpId, notebook_id: notebookId, kind: "pdf",
+        title: file.name, authors: null, venue: null, year: null, pages: null,
+        status: "parsing", error_msg: null, checked: true, char_count: 0,
+        created_at: new Date().toISOString(),
+      };
+      setSources((prev) => [...prev, tmp]);
+      try {
+        await uploadSource(notebookId, file);
+      } catch (e) {
+        setSources((prev) => prev.filter((s) => s.id !== tmpId));
+        flash(e instanceof Error ? e.message : `Couldn't upload ${file.name}`);
+      }
     }
+    await loadSources();
   };
 
   const onAddUrl = async (url: string) => {
@@ -332,6 +335,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               onCite={onCite}
               onAsk={ask}
               onSaveNote={saveAnswerNote}
+              onUpload={onUpload}
             />
             <StudioPanel notes={notes} onDeleteNote={onDeleteNote} />
           </div>
@@ -388,7 +392,7 @@ function SourcesPanel({
   sources: Source[];
   checkedCount: number;
   onToggle: (s: Source) => void;
-  onUpload: (f: File) => void;
+  onUpload: (files: File[]) => void;
   onAddUrl: (url: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -415,15 +419,16 @@ function SourcesPanel({
         ref={fileRef}
         type="file"
         hidden
-        accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,.html,.mp3,.wav,.m4a"
+        multiple
+        accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,.mp3,.wav,.m4a"
         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onUpload(f);
+          const files = Array.from(e.target.files ?? []);
+          if (files.length) onUpload(files);
           e.target.value = "";
         }}
       />
       <button className="dn-add-source" onClick={() => fileRef.current?.click()}>
-        <IconPlus size={14} /> <span>Add source</span>
+        <IconPlus size={14} /> <span>Add source{sources.length ? "s" : ""}</span>
       </button>
 
       <button className="dn-add-link" onClick={() => setShowLink((v) => !v)}>
@@ -510,7 +515,7 @@ function SourcesPanel({
 /* ---------------- Chat ---------------- */
 function ChatPanel({
   messages, streaming, chatError, sourceCount, overview, overviewLoading,
-  threads, threadId, onNewThread, onSwitchThread, openCite, onCite, onAsk, onSaveNote, followUps,
+  threads, threadId, onNewThread, onSwitchThread, openCite, onCite, onAsk, onSaveNote, followUps, onUpload,
 }: {
   messages: Message[];
   streaming: string | null;
@@ -527,9 +532,11 @@ function ChatPanel({
   onCite: (c: Citation) => void;
   onAsk: (q: string) => void;
   onSaveNote: (m: Message) => void;
+  onUpload: (files: File[]) => void;
 }) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const attachRef = useRef<HTMLInputElement>(null);
   const busy = streaming !== null;
 
   useEffect(() => {
@@ -632,7 +639,25 @@ function ChatPanel({
 
       <div className="dn-composer">
         <div className="dn-composer-inner">
-          <button className="dn-composer-attach" title="Attach"><IconAttach size={15} /></button>
+          <input
+            ref={attachRef}
+            type="file"
+            hidden
+            multiple
+            accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,.mp3,.wav,.m4a"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              if (files.length) onUpload(files);
+              e.target.value = "";
+            }}
+          />
+          <button
+            className="dn-composer-attach"
+            title="Attach a file as a source"
+            onClick={() => attachRef.current?.click()}
+          >
+            <IconAttach size={15} />
+          </button>
           <input
             className="dn-composer-input"
             placeholder={

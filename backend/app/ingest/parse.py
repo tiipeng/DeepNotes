@@ -40,28 +40,27 @@ class ParsedDoc:
     num_pages: int
 
 
-@lru_cache(maxsize=1)
-def _converter() -> DocumentConverter:
+@lru_cache(maxsize=2)
+def _converter(ocr: bool = False) -> DocumentConverter:
     # Resolve compute device once: CUDA on GPU servers, CPU otherwise. MPS is
     # deliberately avoided on Apple Silicon — it lacks float64 and crashes Docling's
     # RT-DETR layout model. Do not switch this to MPS.
     device = AcceleratorDevice.CUDA if torch.cuda.is_available() else AcceleratorDevice.CPU
     opts = PdfPipelineOptions()
     opts.accelerator_options = AcceleratorOptions(device=device)
-    opts.do_ocr = False  # text-layer docs: skip OCR (faster, no model downloads)
+    opts.do_ocr = ocr  # OCR is slow; only enabled as a fallback for no-text-layer PDFs
+    if ocr:
+        # RapidOCR (onnxruntime) — portable across CPU/Linux/CUDA, no system tesseract.
+        from docling.datamodel.pipeline_options import RapidOcrOptions
+
+        opts.ocr_options = RapidOcrOptions()
     return DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
     )
 
 
-def parse_plain_text(text: str) -> ParsedDoc:
-    return ParsedDoc(markdown=text, spans=[Span(0, len(text), None, None)], num_pages=0)
-
-
-def parse_document(source: str | Path) -> ParsedDoc:
-    """Parse a file path or URL via Docling into markdown + page/section spans."""
-    doc = _converter().convert(str(source)).document
-
+def _build(doc) -> ParsedDoc:
+    """Docling document -> canonical markdown + aligned page/section spans."""
     parts: list[str] = []
     spans: list[Span] = []
     pos = 0
@@ -99,6 +98,29 @@ def parse_document(source: str | Path) -> ParsedDoc:
     pages = getattr(doc, "pages", None)
     num_pages = len(pages) if pages else max((s.page or 0 for s in spans), default=0)
     return ParsedDoc(markdown=markdown, spans=spans, num_pages=num_pages)
+
+
+def _needs_ocr(parsed: ParsedDoc) -> bool:
+    """True when a paged document came back with essentially no text layer
+    (scanned / image-only PDF) — the signal to retry with OCR."""
+    if not parsed.num_pages:  # URLs / non-paged content: never OCR
+        return False
+    return len(parsed.markdown.strip()) < 50 * parsed.num_pages
+
+
+def parse_plain_text(text: str) -> ParsedDoc:
+    return ParsedDoc(markdown=text, spans=[Span(0, len(text), None, None)], num_pages=0)
+
+
+def parse_document(source: str | Path) -> ParsedDoc:
+    """Parse a file path or URL via Docling into markdown + page/section spans.
+
+    Fast path is text-layer extraction (no OCR). If a paged document comes back with
+    no usable text (scanned / image-only PDF), retry once with OCR enabled."""
+    parsed = _build(_converter(ocr=False).convert(str(source)).document)
+    if _needs_ocr(parsed):
+        parsed = _build(_converter(ocr=True).convert(str(source)).document)
+    return parsed
 
 
 def span_at(offset: int, spans: list[Span]) -> Span | None:

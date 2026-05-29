@@ -12,6 +12,7 @@ sqlalchemy
 
 # Parsing + RAG (the OSS heavy-lifting)
 docling
+rapidocr-onnxruntime   # OCR fallback for scanned/image-only PDFs (portable, CPU/Linux)
 llama-index-core
 llama-index-llms-google-genai
 llama-index-embeddings-google-genai

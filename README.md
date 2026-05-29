@@ -217,9 +217,9 @@ mixed in one collection. (You can keep Gemini for embeddings and only swap the *
   or paste it in-app via **Settings → Gemini API key** (no restart needed).
 - **Frontend can't reach the backend / CORS errors** — set `NEXT_PUBLIC_API_URL` (frontend
   `.env.local`) to the backend URL, and add the frontend's origin to `CORS_ORIGINS` in
-  `backend/.env`. This matters when you open the app on a **LAN/Tailscale IP** rather than
-  `localhost` (e.g. `NEXT_PUBLIC_API_URL=http://100.x.x.x:8000` and
-  `CORS_ORIGINS=http://100.x.x.x:3000`).
+  `backend/.env`. This matters when you open the app on a **host or IP other than
+  `localhost`** (e.g. `NEXT_PUBLIC_API_URL=http://192.168.1.50:8000` and
+  `CORS_ORIGINS=http://192.168.1.50:3000`).
 - **Port already in use** — change `--port` on uvicorn and point `NEXT_PUBLIC_API_URL` at it.
 - **First answer or upload is slow** — that's the one-time model download (Docling / OCR / Whisper).
 - **Rate-limit errors on heavy use** — the Gemini free tier is limited; slow down or switch the

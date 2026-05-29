@@ -81,7 +81,8 @@ def conversational_prompt(question: str, sources: list[Source]) -> str:
         "You are DeepNotes, an assistant that answers strictly from a user's own uploaded "
         "sources, with clickable citations. Reply to the message below in 1-2 warm, brief "
         "sentences, then orient the user toward what they can do with THIS notebook. Do not "
-        "invent source content; only reference the titles listed. No citations.\n\n"
+        "invent source content; only reference the titles listed. No citations. Reply in the "
+        "same language as the message.\n\n"
         f"Sources in this notebook:\n{_titles(sources)}\n\n"
         f"Message: {question}\nReply:"
     )
@@ -93,8 +94,8 @@ def meta_prompt(question: str, sources: list[Source]) -> str:
         "asking for guidance (e.g. example prompts / what they can ask), NOT a factual "
         "lookup. Using ONLY what the sources below actually contain, give a brief helpful "
         "reply: 1 short orienting sentence, then 3-4 concrete example prompts they could ask, "
-        "as a bullet list. Keep prompts answerable from these sources. No citations, and "
-        "never say you couldn't find an answer.\n\n"
+        "as a bullet list. Keep prompts answerable from these sources. No citations, never "
+        "say you couldn't find an answer, and reply in the same language as the request.\n\n"
         f"Sources:\n{_excerpts(sources)}\n\n"
         f"Request: {question}\nReply:"
     )
@@ -103,6 +104,7 @@ def meta_prompt(question: str, sources: list[Source]) -> str:
 _FOLLOWUP_PROMPT = """Based ONLY on the sources below and the exchange that just happened,
 suggest {n} natural follow-up questions the user could ask next that are clearly answerable
 from these sources. Keep each under 90 characters. Do not repeat the question just asked.
+Write the questions in the same language as the "Just asked" question.
 
 Sources:
 {excerpts}

@@ -51,7 +51,7 @@ Question: {question}
 JSON:"""
 
 _NL_PROMPT = """Answer the question in one or two sentences using ONLY the query result.
-State the concrete numbers. Do not invent anything.
+State the concrete numbers. Do not invent anything. Answer in the same language as the question.
 
 Question: {question}
 SQL: {sql}

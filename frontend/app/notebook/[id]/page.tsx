@@ -170,18 +170,23 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const checkedReady = sources.filter((s) => s.checked && s.status === "ready");
   const readyCount = sources.filter((s) => s.status === "ready").length;
 
-  // Overview regenerates only when the set of ready sources changes (backend caches
-  // by fingerprint, so unchanged sets are a cheap no-op).
+  // Overview regenerates only when the set of ready sources changes. Debounced so a
+  // multi-file upload (which flips several sources to ready in quick succession) triggers
+  // one fetch on the final set, not one per file. On error we KEEP the previous overview
+  // (never blank it) so the description survives a transient summary hiccup.
   useEffect(() => {
     if (readyCount === 0) {
       setOverview({ summary: "", suggested_questions: [], ready: false });
       return;
     }
     setOverviewLoading(true);
-    getNotebookSummary(notebookId)
-      .then(setOverview)
-      .catch(() => setOverview(null))
-      .finally(() => setOverviewLoading(false));
+    const t = window.setTimeout(() => {
+      getNotebookSummary(notebookId)
+        .then(setOverview)
+        .catch(() => {/* keep previous overview */})
+        .finally(() => setOverviewLoading(false));
+    }, 600);
+    return () => window.clearTimeout(t);
   }, [notebookId, readyCount]);
 
   const onToggle = async (s: Source) => {
@@ -711,9 +716,10 @@ function ThreadBar({
           <button
             className="dn-thread-current"
             onClick={() => setOpen((v) => !v)}
-            title="Switch thread"
+            title="Switch conversation thread"
           >
             <IconNote size={13} />
+            <span className="dn-thread-caption">Thread</span>
             <span className="dn-thread-current-label">{label}</span>
             <span className={`dn-thread-caret ${open ? "is-open" : ""}`}><IconChevronRight size={12} /></span>
           </button>

@@ -471,7 +471,10 @@ body {
 .dn-thread-current { display: inline-flex; align-items: center; gap: 8px; max-width: 240px; padding: 5px 8px; border-radius: var(--r-md); color: var(--ink); background: none; cursor: pointer; transition: background 0.15s; }
 .dn-thread-current:hover { background: var(--bg-2); }
 .dn-thread-current > svg { color: var(--muted); flex-shrink: 0; }
-.dn-thread-current-label { font-family: var(--font-serif); font-size: 15px; font-weight: 500; letter-spacing: -0.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A secondary control, NOT a title — the notebook title lives in the breadcrumb above. */
+.dn-thread-current-label { font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; color: var(--muted); letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+.dn-thread-current:hover .dn-thread-current-label { color: var(--ink-2); }
+.dn-thread-caption { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2); background: var(--bg-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; flex-shrink: 0; }
 .dn-thread-caret { display: inline-flex; transition: transform 0.15s; color: var(--muted); flex-shrink: 0; }
 .dn-thread-caret.is-open { transform: rotate(90deg); }
 .dn-thread-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; min-width: 260px; max-height: 320px; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-pop); padding: 6px; }

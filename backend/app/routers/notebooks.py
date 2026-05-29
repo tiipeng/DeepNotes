@@ -103,6 +103,18 @@ def notebook_summary(notebook_id: str, db: Session = Depends(get_db)):
         )
 
     summary, questions = generate_summary(ready)
+    if not summary:
+        # Generation hiccupped (rate limit / parse failure). Never cache or serve a blank
+        # over a good one — keep the previous summary so the description doesn't vanish
+        # after, e.g., a multi-file upload that triggered several regenerations.
+        if cached and cached.summary:
+            return NotebookSummaryRead(
+                summary=cached.summary,
+                suggested_questions=json.loads(cached.questions_json),
+                ready=True,
+            )
+        return NotebookSummaryRead(summary="", suggested_questions=[], ready=True)
+
     if cached:
         cached.fingerprint = fp
         cached.summary = summary

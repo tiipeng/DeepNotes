@@ -79,6 +79,11 @@ def ingest_tables(db: Session, source: Source, path: str) -> int:
             if df.empty:
                 continue
             df.columns = [str(c) for c in df.columns]
+            # __rowid__ = the 0-based source-row index, matching the markdown table's
+            # data-row order (parse_xlsx reads the same sheet the same way). It lets
+            # text-to-SQL evidence queries point citations at the exact source rows.
+            df = df.copy()
+            df.insert(0, "__rowid__", range(len(df)))
             tname = _table_name(source.id, sheet)
             con.execute(f'DROP TABLE IF EXISTS "{tname}"')
             con.register("df_tmp", df)

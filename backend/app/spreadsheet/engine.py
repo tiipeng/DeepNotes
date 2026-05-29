@@ -1,8 +1,11 @@
 """Text-to-SQL spreadsheet reasoning over DuckDB tables.
 
 The LLM turns a question into a read-only DuckDB query against the notebook's
-XLSX tables; we execute it and phrase a natural-language answer. Returns None when
-the question isn't answerable from the tables, so chat falls back to RAG.
+XLSX tables; we execute it and phrase a natural-language answer. It also returns an
+`evidence_sql` that selects the `__rowid__` of the source rows behind the answer, so
+the citation lands on the exact rows (e.g. the GROUP BY rows behind a SUM), not just
+the sheet heading. Returns None when the question isn't answerable, so chat falls
+back to RAG.
 """
 
 import json
@@ -16,18 +19,31 @@ from .store import notebook_table_schemas, run_select
 
 _SQL_GUARD = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
 _FENCE = re.compile(r"```(?:json|sql)?|```", re.IGNORECASE)
+_ROWID = "__rowid__"
 
-_SQL_PROMPT = """You translate a question into ONE read-only DuckDB SQL query over the tables below.
+_SQL_PROMPT = """You translate a question into DuckDB SQL over the tables below.
+Every table also has a "__rowid__" integer column = its source-row index (do not treat
+it as data).
 
 Tables:
 {schema}
 
+Return a JSON object with two fields:
+- "sql": ONE read-only SELECT/WITH query that COMPUTES the answer. Do NOT select
+  "__rowid__" here.
+- "evidence_sql": a read-only SELECT against a SINGLE table returning "__rowid__" for
+  ONLY the source rows that support the SPECIFIC answer (not the whole table). If the
+  answer is one group/category, return just that group's rows — self-filter with a
+  subquery since you don't know the winner yet. Return null if not applicable.
+  Example — "which region has the highest revenue?":
+    "evidence_sql": "SELECT \\"__rowid__\\" FROM \\"t\\" WHERE \\"Region\\" = (SELECT \\"Region\\" FROM \\"t\\" GROUP BY \\"Region\\" ORDER BY SUM(\\"Revenue\\") DESC LIMIT 1)"
+
 Rules:
 - Use ONLY these tables/columns. Double-quote all identifiers (e.g. "Revenue").
 - SELECT/WITH only. No INSERT/UPDATE/DELETE/DDL.
-- If the question CANNOT be answered from these tables, return null for sql.
+- If the question CANNOT be answered from these tables, return {{"sql": null}}.
 
-Respond with ONLY a JSON object: {{"sql": "<query>"}} or {{"sql": null}}.
+Respond with ONLY a JSON object: {{"sql": "<query>", "evidence_sql": "<query or null>"}}.
 
 Question: {question}
 JSON:"""
@@ -46,7 +62,7 @@ Answer:"""
 def _schema_text(schemas: list[dict]) -> str:
     lines = []
     for s in schemas:
-        cols = ", ".join(f'"{n}" {t}' for n, t in s["columns"])
+        cols = ", ".join(f'"{n}" {t}' for n, t in s["columns"] if n != _ROWID)
         lines.append(
             f'Table "{s["table"]}" (from {s["source_title"]}, sheet "{s["sheet"]}", '
             f'{s["rows"]} rows): {cols}'
@@ -54,20 +70,22 @@ def _schema_text(schemas: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _extract_sql(raw: str) -> str | None:
+def _extract_plan(raw: str) -> tuple[str | None, str | None]:
+    """Return (sql, evidence_sql) from the model's JSON (or a bare SELECT fallback)."""
     text = _FENCE.sub("", raw).strip()
     try:
         obj = json.loads(text)
         sql = obj.get("sql")
-        return sql.strip() if isinstance(sql, str) and sql.strip() else None
+        ev = obj.get("evidence_sql")
+        sql = sql.strip() if isinstance(sql, str) and sql.strip() else None
+        ev = ev.strip() if isinstance(ev, str) and ev.strip() else None
+        return sql, ev
     except (ValueError, AttributeError):
-        # Fallback: a bare SELECT/WITH the model returned without JSON.
-        return text if _SQL_GUARD.match(text) else None
+        return (text if _SQL_GUARD.match(text) else None), None
 
 
 def _sheet_span(source: Source, sheet: str) -> tuple[int, int]:
-    """Char offsets of a sheet's section in the source's parsed markdown (for the
-    drawer). parse_xlsx stores one span per sheet as [start, end, page, sheet]."""
+    """Char offsets of a sheet's section in the source's parsed markdown."""
     try:
         spans = json.loads(source.page_map or "[]")
     except (ValueError, TypeError):
@@ -79,35 +97,96 @@ def _sheet_span(source: Source, sheet: str) -> tuple[int, int]:
     return 0, 0
 
 
-def _table_citations(db: Session, schemas: list[dict], sql: str) -> list[dict]:
-    """One citation per table the SQL actually referenced, pointing at the
-    originating source + sheet so the answer stays clickable/grounded."""
+def _row_spans(markdown: str, sheet_start: int, sheet_end: int) -> list[tuple[int, int]]:
+    """Char span of each rendered data row in a sheet's markdown table, in row order
+    (index == __rowid__). The first two table rows (header, separator) are skipped."""
+    spans: list[tuple[int, int]] = []
+    pos = sheet_start
+    table_row = 0
+    for line in markdown[sheet_start:sheet_end].splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            if table_row >= 2:  # data rows follow header + separator
+                spans.append((pos, pos + len(line.rstrip("\n"))))
+            table_row += 1
+        pos += len(line)
+    return spans
+
+
+def _evidence_rowids(evidence_sql: str | None) -> list[int] | None:
+    if not evidence_sql or not _SQL_GUARD.match(evidence_sql):
+        return None
+    try:
+        cols, rows = run_select(evidence_sql)
+    except Exception:
+        return None
+    if _ROWID not in cols:
+        return None
+    i = cols.index(_ROWID)
+    rowids = sorted({int(r[i]) for r in rows if r[i] is not None})
+    return rowids[:500]
+
+
+def _base_citation(src: Source, sheet: str, idx: int, start: int, end: int) -> dict:
+    return {
+        "display_index": idx,
+        "source_id": src.id,
+        "chunk_id": None,
+        "source_title": src.title,
+        "source_authors": src.authors,
+        "source_venue": src.venue,
+        "source_kind": src.kind,
+        "page": None,
+        "section": sheet,
+        "char_offset_start": start,
+        "char_offset_end": end,
+        "snippet": src.parsed_markdown[start:end],
+    }
+
+
+def _row_citation(src: Source, sheet: str, rowids: list[int]) -> dict | None:
+    """A citation spanning the contributing source rows in the sheet's markdown table."""
+    s_start, s_end = _sheet_span(src, sheet)
+    if s_end <= s_start:
+        return None
+    spans = _row_spans(src.parsed_markdown, s_start, s_end)
+    hit = [spans[r] for r in rowids if 0 <= r < len(spans)]
+    if not hit:
+        return None
+    start = min(h[0] for h in hit)
+    end = max(h[1] for h in hit)
+    return _base_citation(src, sheet, 1, start, end)
+
+
+def _sheet_citation(src: Source, sheet: str, idx: int) -> dict:
+    """Fallback: point at the sheet heading when row evidence isn't available."""
+    start, end = _sheet_span(src, sheet)
+    heading = f"## {sheet}"
+    h_end = min(end, start + len(heading)) if end > start else start
+    c = _base_citation(src, sheet, idx, start, h_end)
+    c["snippet"] = c["snippet"] or heading
+    return c
+
+
+def _citations(db: Session, schemas: list[dict], sql: str, rowids: list[int] | None,
+               evidence_sql: str | None) -> list[dict]:
+    """Prefer row-level citations from the evidence query (single table); otherwise
+    fall back to one sheet-level citation per table the answer SQL referenced."""
+    if rowids:
+        ev_tables = [s for s in schemas if s["table"] in (evidence_sql or "")]
+        if len(ev_tables) == 1:
+            src = db.get(Source, ev_tables[0]["source_id"])
+            if src is not None:
+                row_cite = _row_citation(src, ev_tables[0]["sheet"], rowids)
+                if row_cite is not None:
+                    return [row_cite]
+
     used = [s for s in schemas if s["table"] in sql] or schemas
     out: list[dict] = []
     for i, s in enumerate(used, start=1):
         src = db.get(Source, s["source_id"])
-        if src is None:
-            continue
-        start, end = _sheet_span(src, s["sheet"])
-        # Highlight the sheet heading; the drawer renders the table rows around it.
-        heading = f"## {s['sheet']}"
-        h_end = min(end, start + len(heading)) if end > start else start
-        out.append(
-            {
-                "display_index": i,
-                "source_id": src.id,
-                "chunk_id": None,
-                "source_title": src.title,
-                "source_authors": src.authors,
-                "source_venue": src.venue,
-                "source_kind": src.kind,
-                "page": None,
-                "section": s["sheet"],
-                "char_offset_start": start,
-                "char_offset_end": h_end,
-                "snippet": src.parsed_markdown[start:h_end] or heading,
-            }
-        )
+        if src is not None:
+            out.append(_sheet_citation(src, s["sheet"], i))
     return out
 
 
@@ -120,7 +199,7 @@ def answer_with_tables(
 
     llm = get_provider().llm()
     raw = llm.complete(_SQL_PROMPT.format(schema=_schema_text(schemas), question=question)).text
-    sql = _extract_sql(raw)
+    sql, evidence_sql = _extract_plan(raw)
     if not sql or not _SQL_GUARD.match(sql):  # read-only guard
         return None
 
@@ -129,6 +208,8 @@ def answer_with_tables(
     except Exception:
         return None  # malformed query -> fall back to RAG
 
+    rowids = _evidence_rowids(evidence_sql)
+
     preview = rows[:50]
     nl = llm.complete(
         _NL_PROMPT.format(
@@ -136,7 +217,7 @@ def answer_with_tables(
         )
     ).text.strip()
 
-    citations = _table_citations(db, schemas, sql)
+    citations = _citations(db, schemas, sql, rowids, evidence_sql)
     # Append clickable [n] markers so the spreadsheet answer is grounded like RAG.
     if citations:
         nl = f"{nl} " + "".join(f"[{c['display_index']}]" for c in citations)

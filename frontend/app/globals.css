@@ -383,6 +383,28 @@ body {
 .dn-source-list::-webkit-scrollbar-thumb, .dn-chat-scroll::-webkit-scrollbar-thumb, .dn-cd-pages::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
 .dn-source-list::-webkit-scrollbar-thumb:hover, .dn-chat-scroll::-webkit-scrollbar-thumb:hover, .dn-cd-pages::-webkit-scrollbar-thumb:hover { background: var(--border-3); background-clip: padding-box; }
 
+/* ---------- Responsive: collapse below ~1000px ---------- */
+@media (max-width: 1000px) {
+  .dn-main { padding: 16px 16px 56px; }
+  /* Top bar: drop the centered global search, keep brand + right controls reachable */
+  .dn-topbar { grid-template-columns: 1fr auto; gap: 12px; padding: 12px 16px; }
+  .dn-top-mid { display: none; }
+  .dn-search { min-width: 0; }
+  /* Stack the three columns; chat stays primary (first) */
+  .dn-three-col { grid-template-columns: 1fr; gap: 14px; min-height: 0; }
+  .dn-three-col, .dn-col { min-height: 0; }
+  .dn-col-chat { order: -1; }
+  .dn-col { min-height: 380px; }
+  .dn-col-chat { min-height: 70vh; }
+  .dn-chat-scroll { max-height: 60vh; }
+  /* Dashboard cards: 2-up */
+  .dn-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .dn-grid { grid-template-columns: 1fr; }
+  .dn-subhead { flex-wrap: wrap; gap: 8px; }
+}
+
 /* ---------- Spreadsheet result block ---------- */
 .dn-table-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
 .dn-table-label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2); }

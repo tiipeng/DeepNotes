@@ -1,10 +1,12 @@
 import type {
   ChatResponse,
+  Citation,
   Health,
   Message,
   Notebook,
   Passage,
   Source,
+  TableResult,
 } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -47,13 +49,76 @@ export async function uploadSource(notebookId: string, file: File): Promise<Sour
   return res.json();
 }
 
-export const getMessages = (notebookId: string) =>
-  req<Message[]>(`/notebooks/${notebookId}/messages`);
-export const sendChat = (notebookId: string, question: string) =>
+export const getMessages = (notebookId: string, threadId?: string) =>
+  req<Message[]>(
+    `/notebooks/${notebookId}/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`,
+  );
+export const sendChat = (notebookId: string, question: string, threadId = "default") =>
   req<ChatResponse>(`/notebooks/${notebookId}/chat`, {
     method: "POST",
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, thread_id: threadId }),
   });
+
+export interface StreamDone {
+  message_id: string;
+  answer_markdown: string;
+  grounded: boolean;
+  citations: Citation[];
+  table_result: TableResult | null;
+}
+
+/** POST a question and stream the answer over SSE. Calls onToken as prose
+ * arrives, onDone once the answer + resolved citations are ready. */
+export async function streamChat(
+  notebookId: string,
+  question: string,
+  threadId: string,
+  handlers: {
+    onToken: (delta: string) => void;
+    onDone: (d: StreamDone) => void;
+    onError: (detail: string) => void;
+  },
+  signal?: AbortSignal,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/notebooks/${notebookId}/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, thread_id: threadId }),
+      signal,
+    });
+  } catch {
+    handlers.onError("Can't reach the backend. Check your connection and try again.");
+    return;
+  }
+  if (!res.ok || !res.body) {
+    handlers.onError(`The server returned an error (${res.status}). Please try again.`);
+    return;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split("\n\n");
+      buf = events.pop() ?? "";
+      for (const ev of events) {
+        const line = ev.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        const obj = JSON.parse(line.slice(6));
+        if (obj.type === "token") handlers.onToken(obj.delta as string);
+        else if (obj.type === "done") handlers.onDone(obj as StreamDone);
+        else if (obj.type === "error") handlers.onError(obj.detail as string);
+      }
+    }
+  } catch {
+    handlers.onError("The answer stream was interrupted. Please try again.");
+  }
+}
 
 export const getPassage = (sourceId: string, start: number, end: number) =>
   req<Passage>(`/sources/${sourceId}/passage?start=${start}&end=${end}`);

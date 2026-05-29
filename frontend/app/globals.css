@@ -370,3 +370,16 @@ body {
 /* Loading shimmer */
 .dn-loading { color: var(--muted); font-size: 13px; padding: 40px; text-align: center; }
 .dn-thinking { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+
+/* Streaming answer — typing cursor + thinking dots */
+.dn-stream-cursor { display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -0.18em; background: var(--accent); border-radius: 1px; animation: dn-blink 1s steps(2, start) infinite; }
+@keyframes dn-blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+.dn-stream-dots { display: inline-flex; align-items: center; gap: 4px; }
+.dn-stream-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-soft-2); animation: dn-bounce 1.2s ease-in-out infinite; }
+.dn-stream-dots i:nth-child(2) { animation-delay: 0.15s; }
+.dn-stream-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dn-bounce { 0%, 60%, 100% { transform: translateY(0); background: var(--accent-soft-2); } 30% { transform: translateY(-4px); background: var(--accent); } }
+
+/* Inline chat error */
+.dn-chat-error { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--r-md); background: rgba(184, 92, 56, 0.08); border: 1px solid rgba(184, 92, 56, 0.24); color: #8f4527; font-size: 13px; }
+.dn-chat-error svg { flex-shrink: 0; }

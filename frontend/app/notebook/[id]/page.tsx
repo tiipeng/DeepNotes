@@ -6,8 +6,8 @@ import {
   getNotebook,
   getPassage,
   listSources,
-  sendChat,
   setSourceChecked,
+  streamChat,
   uploadSource,
 } from "@/lib/api";
 import type {
@@ -51,7 +51,8 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const [notebook, setNotebook] = useState<Notebook | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [pending, setPending] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
   const [openCite, setOpenCite] = useState<Citation | null>(null);
   const [passage, setPassage] = useState<Passage | null>(null);
 
@@ -62,7 +63,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   useEffect(() => {
     getNotebook(notebookId).then(setNotebook).catch(() => {});
     loadSources().catch(() => {});
-    getMessages(notebookId).then(setMessages).catch(() => {});
+    getMessages(notebookId, "default").then(setMessages).catch(() => {});
   }, [notebookId, loadSources]);
 
   const checkedReady = sources.filter((s) => s.checked && s.status === "ready");
@@ -89,14 +90,31 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   };
 
   const ask = async (question: string) => {
-    if (!question.trim() || pending) return;
-    setPending(question.trim());
-    try {
-      await sendChat(notebookId, question.trim());
-      setMessages(await getMessages(notebookId));
-    } finally {
-      setPending(null);
-    }
+    const q = question.trim();
+    if (!q || streaming !== null) return;
+    setChatError(null);
+    setStreaming("");
+    const userMsg: Message = {
+      id: `u-${Date.now()}`, role: "user", text: q,
+      created_at: new Date().toISOString(), citations: [], table_result: null,
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    await streamChat(notebookId, q, "default", {
+      onToken: (d) => setStreaming((prev) => (prev ?? "") + d),
+      onDone: (done) => {
+        const asst: Message = {
+          id: done.message_id, role: "assistant", text: done.answer_markdown,
+          created_at: new Date().toISOString(),
+          citations: done.citations, table_result: done.table_result,
+        };
+        setMessages((prev) => [...prev, asst]);
+        setStreaming(null);
+      },
+      onError: (detail) => {
+        setChatError(detail);
+        setStreaming(null);
+      },
+    });
   };
 
   const onCite = async (c: Citation) => {
@@ -138,7 +156,8 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
             />
             <ChatPanel
               messages={messages}
-              pending={pending}
+              streaming={streaming}
+              chatError={chatError}
               sourceCount={checkedReady.length}
               openCite={openCite}
               onCite={onCite}
@@ -250,10 +269,11 @@ function SourcesPanel({
 
 /* ---------------- Chat ---------------- */
 function ChatPanel({
-  messages, pending, sourceCount, openCite, onCite, onAsk,
+  messages, streaming, chatError, sourceCount, openCite, onCite, onAsk,
 }: {
   messages: Message[];
-  pending: string | null;
+  streaming: string | null;
+  chatError: string | null;
   sourceCount: number;
   openCite: Citation | null;
   onCite: (c: Citation) => void;
@@ -261,17 +281,18 @@ function ChatPanel({
 }) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const busy = streaming !== null;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, pending]);
+  }, [messages, streaming, chatError]);
 
   const submit = () => {
     onAsk(input);
     setInput("");
   };
 
-  const empty = messages.length === 0 && !pending;
+  const empty = messages.length === 0 && !busy && !chatError;
 
   return (
     <section className="dn-col dn-col-chat">
@@ -322,17 +343,12 @@ function ChatPanel({
                 <AssistantMessage key={m.id} m={m} openCite={openCite} onCite={onCite} />
               ),
             )}
-            {pending && (
-              <>
-                <div className="dn-msg-user">
-                  <div className="dn-msg-bubble">{pending}</div>
-                </div>
-                <div className="dn-msg-assistant">
-                  <span className="dn-thinking">
-                    <IconSparkle size={13} /> Searching your sources…
-                  </span>
-                </div>
-              </>
+            {busy && <StreamingMessage text={streaming ?? ""} />}
+            {chatError && (
+              <div className="dn-chat-error" role="alert">
+                <IconClose size={13} />
+                <span>{chatError}</span>
+              </div>
             )}
           </div>
         )}
@@ -343,14 +359,26 @@ function ChatPanel({
           <button className="dn-composer-attach" title="Attach"><IconAttach size={15} /></button>
           <input
             className="dn-composer-input"
-            placeholder="Ask a question about your sources…"
+            placeholder={
+              sourceCount === 0
+                ? "Add a source to start asking…"
+                : busy
+                  ? "Answering…"
+                  : "Ask a question about your sources…"
+            }
             value={input}
+            disabled={busy || sourceCount === 0}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
           />
           <div className="dn-composer-r">
             <span className="dn-composer-scope">{sourceCount} sources</span>
-            <button className="dn-composer-send" title="Send" onClick={submit} disabled={!input.trim() || !!pending}>
+            <button
+              className="dn-composer-send"
+              title="Send"
+              onClick={submit}
+              disabled={!input.trim() || busy || sourceCount === 0}
+            >
               <IconSend size={14} />
             </button>
           </div>
@@ -360,6 +388,29 @@ function ChatPanel({
         </div>
       </div>
     </section>
+  );
+}
+
+function StreamingMessage({ text }: { text: string }) {
+  return (
+    <div className="dn-msg-assistant">
+      <div className="dn-msg-byline">
+        <span className="dn-assistant-mark" aria-hidden><IconSparkle size={12} /></span>
+        <span className="dn-msg-byline-text">
+          {text ? "Answering from your sources" : "Searching your sources…"}
+        </span>
+      </div>
+      {text ? (
+        <div className="dn-answer">
+          {text}
+          <span className="dn-stream-cursor" aria-hidden />
+        </div>
+      ) : (
+        <span className="dn-thinking">
+          <span className="dn-stream-dots"><i /><i /><i /></span>
+        </span>
+      )}
+    </div>
   );
 }
 

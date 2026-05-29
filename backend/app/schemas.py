@@ -80,6 +80,7 @@ class ChatRequest(BaseModel):
     question: str
     # If omitted, the backend uses all checked + ready sources in the notebook.
     source_ids: list[str] | None = None
+    thread_id: str = "default"
 
 
 class CitationOut(BaseModel):

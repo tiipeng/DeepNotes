@@ -124,6 +124,25 @@ class MessageRead(BaseModel):
     table_result: TableResult | None = None
 
 
+class NoteCreate(BaseModel):
+    title: str
+    body: str = ""
+    tag: str | None = None
+    source_id: str | None = None
+
+
+class NoteRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    notebook_id: str
+    title: str
+    body: str
+    tag: str | None = None
+    source_id: str | None = None
+    created_at: datetime
+
+
 class NotebookSummaryRead(BaseModel):
     summary: str
     suggested_questions: list[str] = []

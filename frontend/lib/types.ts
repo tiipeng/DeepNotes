@@ -80,6 +80,16 @@ export interface Passage {
   post: string;
 }
 
+export interface Note {
+  id: string;
+  notebook_id: string;
+  title: string;
+  body: string;
+  tag: string | null;
+  source_id: string | null;
+  created_at: string;
+}
+
 export interface NotebookOverview {
   summary: string;
   suggested_questions: string[];

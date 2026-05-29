@@ -3,6 +3,7 @@ import type {
   Citation,
   Health,
   Message,
+  Note,
   Notebook,
   NotebookOverview,
   Passage,
@@ -125,3 +126,16 @@ export async function streamChat(
 
 export const getPassage = (sourceId: string, start: number, end: number) =>
   req<Passage>(`/sources/${sourceId}/passage?start=${start}&end=${end}`);
+
+export const listNotes = (notebookId: string) =>
+  req<Note[]>(`/notebooks/${notebookId}/notes`);
+export const createNote = (
+  notebookId: string,
+  data: { title: string; body: string; tag?: string; source_id?: string },
+) =>
+  req<Note>(`/notebooks/${notebookId}/notes`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const deleteNote = (noteId: string) =>
+  req<void>(`/notes/${noteId}`, { method: "DELETE" });

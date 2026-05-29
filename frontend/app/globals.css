@@ -389,3 +389,17 @@ body {
 /* Inline chat error */
 .dn-chat-error { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--r-md); background: rgba(184, 92, 56, 0.08); border: 1px solid rgba(184, 92, 56, 0.24); color: #8f4527; font-size: 13px; }
 .dn-chat-error svg { flex-shrink: 0; }
+
+/* Toast */
+.dn-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 60; background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 500; padding: 10px 16px; border-radius: 999px; box-shadow: var(--shadow-pop); animation: dn-toast-in 0.2s ease; }
+@keyframes dn-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* Studio notes */
+.dn-studio-notes { flex: 1; overflow: auto; }
+.dn-note-title-btn { display: block; width: 100%; text-align: left; background: none; cursor: pointer; }
+.dn-note-body-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.dn-note-del { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); background: none; cursor: pointer; font-size: 11px; padding: 2px 4px; border-radius: 4px; transition: color 0.15s, background 0.15s; }
+.dn-note-del:hover { color: #B85C38; background: rgba(184, 92, 56, 0.08); }
+.dn-soon-badge { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--bg-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
+.dn-audio-cta.is-soon { cursor: default; opacity: 0.85; }
+.dn-audio-cta.is-soon:hover { border-color: var(--border); background: var(--bg); }

@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  createNote,
+  deleteNote,
   getMessages,
   getNotebook,
   getNotebookSummary,
   getPassage,
+  listNotes,
   listSources,
   setSourceChecked,
   streamChat,
@@ -14,16 +17,18 @@ import {
 import type {
   Citation,
   Message,
+  Note,
   Notebook,
   NotebookOverview,
   Passage,
   Source,
   TableResult,
 } from "@/lib/types";
+
+const stripMarkers = (s: string) => s.replace(/\s*\[\d+\]/g, "");
 import { TopBar } from "@/components/TopBar";
 import {
   IconAttach,
-  IconBookmark,
   IconCheck,
   IconChevronRight,
   IconClose,
@@ -53,16 +58,66 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const [passage, setPassage] = useState<Passage | null>(null);
   const [overview, setOverview] = useState<NotebookOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const flash = useCallback((msg: string) => {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 2600);
+  }, []);
 
   const loadSources = useCallback(async () => {
     setSources(await listSources(notebookId));
+  }, [notebookId]);
+  const loadNotes = useCallback(async () => {
+    setNotes(await listNotes(notebookId));
   }, [notebookId]);
 
   useEffect(() => {
     getNotebook(notebookId).then(setNotebook).catch(() => {});
     loadSources().catch(() => {});
+    loadNotes().catch(() => {});
     getMessages(notebookId, "default").then(setMessages).catch(() => {});
-  }, [notebookId, loadSources]);
+  }, [notebookId, loadSources, loadNotes]);
+
+  const saveNote = useCallback(
+    async (data: { title: string; body: string; tag?: string; source_id?: string }) => {
+      try {
+        await createNote(notebookId, data);
+        await loadNotes();
+        flash("Saved to notes");
+      } catch {
+        flash("Couldn't save note");
+      }
+    },
+    [notebookId, loadNotes, flash],
+  );
+
+  const onDeleteNote = useCallback(
+    async (id: string) => {
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+      try {
+        await deleteNote(id);
+      } catch {
+        loadNotes();
+      }
+    },
+    [loadNotes],
+  );
+
+  const saveAnswerNote = (m: Message) => {
+    const body = stripMarkers(m.text).trim();
+    const title = body.split(/(?<=[.?!])\s/)[0].slice(0, 80) || "Answer";
+    saveNote({ title, body, tag: "answer" });
+  };
+  const savePassageNote = (c: Citation) => {
+    saveNote({
+      title: c.source_title,
+      body: stripMarkers(c.snippet).trim(),
+      tag: "quote",
+      source_id: c.source_id,
+    });
+  };
 
   const checkedReady = sources.filter((s) => s.checked && s.status === "ready");
   const readyCount = sources.filter((s) => s.status === "ready").length;
@@ -177,8 +232,9 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               openCite={openCite}
               onCite={onCite}
               onAsk={ask}
+              onSaveNote={saveAnswerNote}
             />
-            <StudioPanel />
+            <StudioPanel notes={notes} onDeleteNote={onDeleteNote} />
           </div>
         </div>
       </main>
@@ -186,11 +242,14 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
       <CitationDrawer
         cite={openCite}
         passage={passage}
+        onSave={savePassageNote}
         onClose={() => {
           setOpenCite(null);
           setPassage(null);
         }}
       />
+
+      {toast && <div className="dn-toast" role="status">{toast}</div>}
     </div>
   );
 }
@@ -284,7 +343,7 @@ function SourcesPanel({
 
 /* ---------------- Chat ---------------- */
 function ChatPanel({
-  messages, streaming, chatError, sourceCount, overview, overviewLoading, openCite, onCite, onAsk,
+  messages, streaming, chatError, sourceCount, overview, overviewLoading, openCite, onCite, onAsk, onSaveNote,
 }: {
   messages: Message[];
   streaming: string | null;
@@ -295,6 +354,7 @@ function ChatPanel({
   openCite: Citation | null;
   onCite: (c: Citation) => void;
   onAsk: (q: string) => void;
+  onSaveNote: (m: Message) => void;
 }) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -386,7 +446,7 @@ function ChatPanel({
                   <div className="dn-msg-bubble">{m.text}</div>
                 </div>
               ) : (
-                <AssistantMessage key={m.id} m={m} openCite={openCite} onCite={onCite} />
+                <AssistantMessage key={m.id} m={m} openCite={openCite} onCite={onCite} onSaveNote={onSaveNote} />
               ),
             )}
             {busy && <StreamingMessage text={streaming ?? ""} />}
@@ -461,11 +521,12 @@ function StreamingMessage({ text }: { text: string }) {
 }
 
 function AssistantMessage({
-  m, openCite, onCite,
+  m, openCite, onCite, onSaveNote,
 }: {
   m: Message;
   openCite: Citation | null;
   onCite: (c: Citation) => void;
+  onSaveNote: (m: Message) => void;
 }) {
   const byId = new Map(m.citations.map((c) => [c.display_index, c]));
   const grounded = m.citations.length > 0;
@@ -516,10 +577,15 @@ function AssistantMessage({
 
       {(grounded || table) && (
         <div className="dn-msg-tools">
-          <button className="dn-tool"><IconCopy size={13} /> Copy</button>
-          <button className="dn-tool"><IconQuote size={13} /> Save as note</button>
-          <button className="dn-tool"><IconBookmark size={13} /> Pin</button>
-          <button className="dn-tool dn-tool-r"><IconRefresh size={13} /> Rerun</button>
+          <button
+            className="dn-tool"
+            onClick={() => navigator.clipboard?.writeText(stripMarkers(m.text))}
+          >
+            <IconCopy size={13} /> Copy
+          </button>
+          <button className="dn-tool" onClick={() => onSaveNote(m)}>
+            <IconQuote size={13} /> Save as note
+          </button>
         </div>
       )}
     </div>
@@ -585,33 +651,66 @@ function TableCard({ table }: { table: TableResult }) {
 }
 
 /* ---------------- Studio ---------------- */
-function StudioPanel() {
+function StudioPanel({
+  notes, onDeleteNote,
+}: {
+  notes: Note[];
+  onDeleteNote: (id: string) => void;
+}) {
   return (
     <aside className="dn-col">
       <div className="dn-col-head">
-        <div className="dn-col-title">Studio</div>
-        <button className="dn-icon-btn"><IconMore size={14} /></button>
+        <div className="dn-col-title">
+          Studio <span className="dn-col-count">{notes.length}</span>
+        </div>
       </div>
       <div className="dn-studio-section">
         <div className="dn-studio-h"><IconMic size={13} /> <span>Audio overview</span></div>
-        <button className="dn-audio-cta">
+        <div className="dn-audio-cta is-soon" aria-disabled>
           <span className="dn-audio-cta-mark"><IconSparkle size={15} /></span>
           <span className="dn-audio-cta-body">
-            <span className="dn-audio-cta-title">Generate audio overview</span>
-            <span className="dn-audio-cta-sub">A two-host conversation through your sources · ~12 min</span>
+            <span className="dn-audio-cta-title">
+              Audio overview <span className="dn-soon-badge">Soon</span>
+            </span>
+            <span className="dn-audio-cta-sub">A two-host conversation through your sources</span>
           </span>
-        </button>
+        </div>
       </div>
-      <div className="dn-studio-section">
-        <div className="dn-studio-h">
-          <IconNote size={13} /> <span>Notes</span>
-          <button className="dn-studio-h-add"><IconPlus size={12} /></button>
-        </div>
-        <div className="dn-studio-empty">
-          Saved snippets and answers will appear here.
-        </div>
+      <div className="dn-studio-section dn-studio-notes">
+        <div className="dn-studio-h"><IconNote size={13} /> <span>Notes</span></div>
+        {notes.length === 0 ? (
+          <div className="dn-studio-empty">
+            Save an answer or a cited passage and it&apos;ll be kept here.
+          </div>
+        ) : (
+          <div className="dn-notes">
+            {notes.map((n) => (
+              <NoteCard key={n.id} note={n} onDelete={() => onDeleteNote(n.id)} />
+            ))}
+          </div>
+        )}
       </div>
     </aside>
+  );
+}
+
+function NoteCard({ note, onDelete }: { note: Note; onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
+  const date = new Date(note.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return (
+    <div className="dn-note">
+      {note.tag && <span className="dn-note-tag">{note.tag}</span>}
+      <button className="dn-note-title-btn" onClick={() => setOpen((v) => !v)}>
+        <span className="dn-note-title">{note.title}</span>
+      </button>
+      <p className={`dn-note-body ${open ? "" : "dn-note-body-clamp"}`}>{note.body}</p>
+      <div className="dn-note-foot">
+        <span>{date}</span>
+        <button className="dn-note-del" onClick={onDelete} title="Delete note">
+          <IconClose size={12} /> Delete
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -621,10 +720,11 @@ function cleanLine(s: string) {
 }
 
 function CitationDrawer({
-  cite, passage, onClose,
+  cite, passage, onSave, onClose,
 }: {
   cite: Citation | null;
   passage: Passage | null;
+  onSave: (c: Citation) => void;
   onClose: () => void;
 }) {
   const open = !!cite;
@@ -666,7 +766,13 @@ function CitationDrawer({
                 </div>
               </div>
               <div className="dn-cd-head-r">
-                <button className="dn-icon-btn" title="Copy passage"><IconCopy size={14} /></button>
+                <button
+                  className="dn-icon-btn"
+                  title="Copy passage"
+                  onClick={() => navigator.clipboard?.writeText(cleanLine(cite.snippet))}
+                >
+                  <IconCopy size={14} />
+                </button>
                 <button className="dn-icon-btn dn-cd-close" title="Close" onClick={onClose}>
                   <IconClose size={14} />
                 </button>
@@ -705,10 +811,9 @@ function CitationDrawer({
 
             <footer className="dn-cd-foot">
               <div className="dn-cd-foot-l">
-                <span className="dn-mono">⌘ ↵</span>
-                <span>Insert passage as quoted note</span>
+                <span>Keep this passage in your notebook&apos;s notes</span>
               </div>
-              <button className="dn-btn dn-btn-primary dn-btn-tight">
+              <button className="dn-btn dn-btn-primary dn-btn-tight" onClick={() => onSave(cite)}>
                 <IconQuote size={13} /> Save as note
               </button>
             </footer>

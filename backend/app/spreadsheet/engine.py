@@ -10,6 +10,7 @@ import re
 
 from sqlalchemy.orm import Session
 
+from ..models import Source
 from ..providers import get_provider
 from .store import notebook_table_schemas, run_select
 
@@ -64,8 +65,56 @@ def _extract_sql(raw: str) -> str | None:
         return text if _SQL_GUARD.match(text) else None
 
 
-def answer_with_tables(db: Session, notebook_id: str, question: str) -> dict | None:
-    schemas = notebook_table_schemas(db, notebook_id)
+def _sheet_span(source: Source, sheet: str) -> tuple[int, int]:
+    """Char offsets of a sheet's section in the source's parsed markdown (for the
+    drawer). parse_xlsx stores one span per sheet as [start, end, page, sheet]."""
+    try:
+        spans = json.loads(source.page_map or "[]")
+    except (ValueError, TypeError):
+        spans = []
+    for row in spans:
+        section = row[3] if len(row) > 3 else None
+        if section == sheet:
+            return int(row[0]), int(row[1])
+    return 0, 0
+
+
+def _table_citations(db: Session, schemas: list[dict], sql: str) -> list[dict]:
+    """One citation per table the SQL actually referenced, pointing at the
+    originating source + sheet so the answer stays clickable/grounded."""
+    used = [s for s in schemas if s["table"] in sql] or schemas
+    out: list[dict] = []
+    for i, s in enumerate(used, start=1):
+        src = db.get(Source, s["source_id"])
+        if src is None:
+            continue
+        start, end = _sheet_span(src, s["sheet"])
+        # Highlight the sheet heading; the drawer renders the table rows around it.
+        heading = f"## {s['sheet']}"
+        h_end = min(end, start + len(heading)) if end > start else start
+        out.append(
+            {
+                "display_index": i,
+                "source_id": src.id,
+                "chunk_id": None,
+                "source_title": src.title,
+                "source_authors": src.authors,
+                "source_venue": src.venue,
+                "source_kind": src.kind,
+                "page": None,
+                "section": s["sheet"],
+                "char_offset_start": start,
+                "char_offset_end": h_end,
+                "snippet": src.parsed_markdown[start:h_end] or heading,
+            }
+        )
+    return out
+
+
+def answer_with_tables(
+    db: Session, notebook_id: str, question: str, source_ids: list[str] | None = None
+) -> dict | None:
+    schemas = notebook_table_schemas(db, notebook_id, source_ids)
     if not schemas:
         return None
 
@@ -87,6 +136,11 @@ def answer_with_tables(db: Session, notebook_id: str, question: str) -> dict | N
         )
     ).text.strip()
 
+    citations = _table_citations(db, schemas, sql)
+    # Append clickable [n] markers so the spreadsheet answer is grounded like RAG.
+    if citations:
+        nl = f"{nl} " + "".join(f"[{c['display_index']}]" for c in citations)
+
     return {
         "answer": nl,
         "sql": sql,
@@ -94,4 +148,5 @@ def answer_with_tables(db: Session, notebook_id: str, question: str) -> dict | N
         "rows": preview,
         "truncated": len(rows) > len(preview),
         "source_title": schemas[0]["source_title"],
+        "citations": citations,
     }

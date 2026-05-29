@@ -41,14 +41,15 @@ def _citation_out(c: Citation, db: Session) -> CitationOut:
 def chat(notebook_id: str, payload: ChatRequest, db: Session = Depends(get_db)):
     nb = _get_notebook(db, notebook_id)
 
-    # Spreadsheet reasoning first: if the notebook has XLSX tables and the question
-    # is answerable via SQL, compute it. Otherwise fall back to grounded RAG.
-    table = answer_with_tables(db, notebook_id, payload.question)
-
+    # Resolve the in-scope sources once; both the spreadsheet and RAG paths honor it.
     if payload.source_ids is not None:
         source_ids = payload.source_ids
     else:
         source_ids = [s.id for s in nb.sources if s.checked and s.status == "ready"]
+
+    # Spreadsheet reasoning first: if the in-scope sources have XLSX tables and the
+    # question is answerable via SQL, compute it. Otherwise fall back to grounded RAG.
+    table = answer_with_tables(db, notebook_id, payload.question, source_ids)
 
     db.add(Message(notebook_id=notebook_id, role="user", text=payload.question))
 
@@ -62,10 +63,26 @@ def chat(notebook_id: str, payload: ChatRequest, db: Session = Depends(get_db)):
             table_json=table_out.model_dump_json(),
         )
         db.add(assistant)
+        db.flush()  # assign assistant.id before linking citations
+        for c in table["citations"]:
+            db.add(
+                Citation(
+                    message_id=assistant.id,
+                    source_id=c["source_id"],
+                    chunk_id=c["chunk_id"],
+                    display_index=c["display_index"],
+                    page=c["page"],
+                    section=c["section"],
+                    char_offset_start=c["char_offset_start"],
+                    char_offset_end=c["char_offset_end"],
+                    snippet=c["snippet"],
+                )
+            )
         db.commit()
         return ChatResponse(
             message_id=assistant.id, answer_markdown=table["answer"],
-            grounded=True, citations=[], table_result=table_out,
+            grounded=True, citations=[CitationOut(**c) for c in table["citations"]],
+            table_result=table_out,
         )
 
     result = answer_question(db, source_ids, payload.question)

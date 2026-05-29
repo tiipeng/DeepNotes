@@ -18,6 +18,18 @@ from ..models import Source, TableData
 
 _MAX_RENDER_ROWS = 200  # cap markdown rendering for huge sheets
 
+# Hardened DuckDB config: the text-to-SQL query is LLM-generated from untrusted
+# input, so the engine must not be able to touch the host filesystem/network.
+# enable_external_access=false disables file functions (read_text/read_csv/glob/
+# parquet/http/ATTACH); lock_configuration=true prevents an injected SET from
+# re-enabling them (DuckDB executes stacked statements). This is the real guard —
+# the SELECT-prefix regex is only a coarse first filter.
+_HARDENED = {"enable_external_access": False, "lock_configuration": True}
+
+
+def _connect(read_only: bool = False):
+    return duckdb.connect(get_settings().tables_path, read_only=read_only, config=_HARDENED)
+
 
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(s).lower()).strip("_") or "sheet"
@@ -58,7 +70,7 @@ def parse_xlsx(path: str) -> ParsedDoc:
 
 def ingest_tables(db: Session, source: Source, path: str) -> int:
     """Load each non-empty sheet into a DuckDB table; record TableData rows."""
-    con = duckdb.connect(get_settings().tables_path)
+    con = _connect()
     try:
         xls = pd.ExcelFile(path)
         n = 0
@@ -95,7 +107,7 @@ def drop_tables(source_id: str) -> None:
     path = get_settings().tables_path
     if not os.path.exists(path):
         return
-    con = duckdb.connect(path)
+    con = _connect()
     try:
         prefix = f"t_{source_id}_"
         names = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
@@ -106,21 +118,30 @@ def drop_tables(source_id: str) -> None:
         con.close()
 
 
-def notebook_table_schemas(db: Session, notebook_id: str) -> list[dict]:
-    """Schemas for the checked+ready XLSX tables in a notebook (for the LLM prompt)."""
-    rows = (
+def notebook_table_schemas(
+    db: Session, notebook_id: str, source_ids: list[str] | None = None
+) -> list[dict]:
+    """Schemas for the in-scope, ready XLSX tables in a notebook (for the LLM prompt).
+
+    Scope honors the chat-time `source_ids` (the same selection the RAG path uses) so
+    spreadsheet reasoning respects which sources the user has in scope. When source_ids
+    is None we fall back to the notebook's checked+ready sources.
+    """
+    q = (
         db.query(TableData, Source)
         .join(Source, TableData.source_id == Source.id)
-        .filter(
-            Source.notebook_id == notebook_id,
-            Source.checked.is_(True),
-            Source.status == "ready",
-        )
-        .all()
+        .filter(Source.notebook_id == notebook_id, Source.status == "ready")
     )
+    if source_ids is None:
+        q = q.filter(Source.checked.is_(True))
+    else:
+        if not source_ids:  # explicitly scoped to nothing
+            return []
+        q = q.filter(Source.id.in_(source_ids))
+    rows = q.all()
     if not rows:
         return []
-    con = duckdb.connect(get_settings().tables_path, read_only=True)
+    con = _connect(read_only=True)
     try:
         schemas = []
         for td, src in rows:
@@ -130,6 +151,7 @@ def notebook_table_schemas(db: Session, notebook_id: str) -> list[dict]:
             schemas.append(
                 {
                     "table": td.rows_ref,
+                    "source_id": src.id,
                     "source_title": src.title,
                     "sheet": td.sheet_name,
                     "columns": cols,
@@ -148,7 +170,7 @@ def _coerce(v):
 
 
 def run_select(sql: str) -> tuple[list[str], list[list]]:
-    con = duckdb.connect(get_settings().tables_path, read_only=True)
+    con = _connect(read_only=True)
     try:
         cur = con.execute(sql)
         cols = [d[0] for d in cur.description]

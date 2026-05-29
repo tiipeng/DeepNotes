@@ -80,6 +80,13 @@ export interface Passage {
   post: string;
 }
 
+export interface Thread {
+  thread_id: string;
+  title: string;
+  message_count: number;
+  updated_at: string;
+}
+
 export interface Note {
   id: string;
   notebook_id: string;

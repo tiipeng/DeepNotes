@@ -8,7 +8,14 @@ from ..db import SessionLocal, get_db
 from ..models import Citation, Message, Notebook, Source
 from ..rag.engine import _DISP_COMPLETE as _DISP
 from ..rag.engine import answer_question, stream_answer
-from ..schemas import ChatRequest, ChatResponse, CitationOut, MessageRead, TableResult
+from ..schemas import (
+    ChatRequest,
+    ChatResponse,
+    CitationOut,
+    MessageRead,
+    TableResult,
+    ThreadRead,
+)
 from ..spreadsheet.engine import answer_with_tables
 
 router = APIRouter(tags=["chat"])
@@ -192,6 +199,31 @@ def chat_stream(notebook_id: str, payload: ChatRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/notebooks/{notebook_id}/threads", response_model=list[ThreadRead])
+def list_threads(notebook_id: str, db: Session = Depends(get_db)):
+    """Conversation threads in a notebook, derived from messages. Title is the first
+    user question; ordered by most-recent activity."""
+    nb = _get_notebook(db, notebook_id)
+    groups: dict[str, list[Message]] = {}
+    for m in nb.messages:
+        groups.setdefault(m.thread_id or "default", []).append(m)
+    threads: list[ThreadRead] = []
+    for tid, msgs in groups.items():
+        msgs.sort(key=lambda x: x.created_at)
+        first_user = next((m for m in msgs if m.role == "user"), None)
+        title = (first_user.text.strip()[:60] if first_user else "New thread") or "New thread"
+        threads.append(
+            ThreadRead(
+                thread_id=tid,
+                title=title,
+                message_count=len(msgs),
+                updated_at=msgs[-1].created_at,
+            )
+        )
+    threads.sort(key=lambda t: t.updated_at, reverse=True)
+    return threads
 
 
 @router.get("/notebooks/{notebook_id}/messages", response_model=list[MessageRead])

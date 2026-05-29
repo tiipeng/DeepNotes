@@ -390,6 +390,25 @@ body {
 .dn-chat-error { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--r-md); background: rgba(184, 92, 56, 0.08); border: 1px solid rgba(184, 92, 56, 0.24); color: #8f4527; font-size: 13px; }
 .dn-chat-error svg { flex-shrink: 0; }
 
+/* Thread switcher */
+.dn-threadbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
+.dn-thread-select { position: relative; min-width: 0; }
+.dn-thread-current { display: inline-flex; align-items: center; gap: 8px; max-width: 240px; padding: 5px 8px; border-radius: var(--r-md); color: var(--ink); background: none; cursor: pointer; transition: background 0.15s; }
+.dn-thread-current:hover { background: var(--bg-2); }
+.dn-thread-current > svg { color: var(--muted); flex-shrink: 0; }
+.dn-thread-current-label { font-family: var(--font-serif); font-size: 15px; font-weight: 500; letter-spacing: -0.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dn-thread-caret { display: inline-flex; transition: transform 0.15s; color: var(--muted); flex-shrink: 0; }
+.dn-thread-caret.is-open { transform: rotate(90deg); }
+.dn-thread-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; min-width: 260px; max-height: 320px; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-pop); padding: 6px; }
+.dn-thread-empty { padding: 12px; font-size: 12.5px; color: var(--muted); }
+.dn-thread-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 9px 10px; border-radius: var(--r-sm); text-align: left; background: none; cursor: pointer; transition: background 0.15s; }
+.dn-thread-item:hover { background: var(--bg-2); }
+.dn-thread-item.is-active { background: var(--accent-soft); }
+.dn-thread-item-title { font-size: 13px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dn-thread-item.is-active .dn-thread-item-title { color: var(--accent); font-weight: 500; }
+.dn-thread-item-count { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-2); background: var(--bg-2); border-radius: 4px; padding: 1px 6px; flex-shrink: 0; }
+.dn-thread-scrim { position: fixed; inset: 0; z-index: 20; }
+
 /* Toast */
 .dn-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 60; background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 500; padding: 10px 16px; border-radius: 999px; box-shadow: var(--shadow-pop); animation: dn-toast-in 0.2s ease; }
 @keyframes dn-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }

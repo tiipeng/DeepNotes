@@ -115,6 +115,13 @@ class ChatResponse(BaseModel):
     table_result: TableResult | None = None
 
 
+class ThreadRead(BaseModel):
+    thread_id: str
+    title: str
+    message_count: int
+    updated_at: datetime
+
+
 class MessageRead(BaseModel):
     id: str
     role: str

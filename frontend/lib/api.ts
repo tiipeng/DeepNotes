@@ -9,6 +9,7 @@ import type {
   Passage,
   Source,
   TableResult,
+  Thread,
 } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -53,6 +54,8 @@ export async function uploadSource(notebookId: string, file: File): Promise<Sour
   return res.json();
 }
 
+export const listThreads = (notebookId: string) =>
+  req<Thread[]>(`/notebooks/${notebookId}/threads`);
 export const getMessages = (notebookId: string, threadId?: string) =>
   req<Message[]>(
     `/notebooks/${notebookId}/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`,

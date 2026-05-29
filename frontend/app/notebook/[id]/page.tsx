@@ -10,6 +10,7 @@ import {
   getPassage,
   listNotes,
   listSources,
+  listThreads,
   setSourceChecked,
   streamChat,
   uploadSource,
@@ -23,6 +24,7 @@ import type {
   Passage,
   Source,
   TableResult,
+  Thread,
 } from "@/lib/types";
 
 const stripMarkers = (s: string) => s.replace(/\s*\[\d+\]/g, "");
@@ -42,7 +44,6 @@ import {
   IconPlay,
   IconPlus,
   IconQuote,
-  IconRefresh,
   IconSend,
   IconSparkle,
 } from "@/components/icons";
@@ -60,6 +61,8 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [threadId, setThreadId] = useState("default");
+  const [threads, setThreads] = useState<Thread[]>([]);
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -72,13 +75,33 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const loadNotes = useCallback(async () => {
     setNotes(await listNotes(notebookId));
   }, [notebookId]);
+  const loadThreads = useCallback(async () => {
+    setThreads(await listThreads(notebookId));
+  }, [notebookId]);
 
   useEffect(() => {
     getNotebook(notebookId).then(setNotebook).catch(() => {});
     loadSources().catch(() => {});
     loadNotes().catch(() => {});
-    getMessages(notebookId, "default").then(setMessages).catch(() => {});
-  }, [notebookId, loadSources, loadNotes]);
+    loadThreads().catch(() => {});
+  }, [notebookId, loadSources, loadNotes, loadThreads]);
+
+  // Load the active thread's messages whenever the thread changes.
+  useEffect(() => {
+    getMessages(notebookId, threadId).then(setMessages).catch(() => setMessages([]));
+  }, [notebookId, threadId]);
+
+  const newThread = () => {
+    if (streaming !== null) return;
+    setChatError(null);
+    setMessages([]);
+    setThreadId(crypto.randomUUID());
+  };
+  const switchThread = (tid: string) => {
+    if (streaming !== null || tid === threadId) return;
+    setChatError(null);
+    setThreadId(tid);
+  };
 
   const saveNote = useCallback(
     async (data: { title: string; body: string; tag?: string; source_id?: string }) => {
@@ -167,7 +190,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
       created_at: new Date().toISOString(), citations: [], table_result: null,
     };
     setMessages((prev) => [...prev, userMsg]);
-    await streamChat(notebookId, q, "default", {
+    await streamChat(notebookId, q, threadId, {
       onToken: (d) => setStreaming((prev) => (prev ?? "") + d),
       onDone: (done) => {
         const asst: Message = {
@@ -177,6 +200,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
         };
         setMessages((prev) => [...prev, asst]);
         setStreaming(null);
+        loadThreads().catch(() => {}); // surface a brand-new thread in the switcher
       },
       onError: (detail) => {
         setChatError(detail);
@@ -229,6 +253,10 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               sourceCount={checkedReady.length}
               overview={overview}
               overviewLoading={overviewLoading}
+              threads={threads}
+              threadId={threadId}
+              onNewThread={newThread}
+              onSwitchThread={switchThread}
               openCite={openCite}
               onCite={onCite}
               onAsk={ask}
@@ -343,7 +371,8 @@ function SourcesPanel({
 
 /* ---------------- Chat ---------------- */
 function ChatPanel({
-  messages, streaming, chatError, sourceCount, overview, overviewLoading, openCite, onCite, onAsk, onSaveNote,
+  messages, streaming, chatError, sourceCount, overview, overviewLoading,
+  threads, threadId, onNewThread, onSwitchThread, openCite, onCite, onAsk, onSaveNote,
 }: {
   messages: Message[];
   streaming: string | null;
@@ -351,6 +380,10 @@ function ChatPanel({
   sourceCount: number;
   overview: NotebookOverview | null;
   overviewLoading: boolean;
+  threads: Thread[];
+  threadId: string;
+  onNewThread: () => void;
+  onSwitchThread: (tid: string) => void;
   openCite: Citation | null;
   onCite: (c: Citation) => void;
   onAsk: (q: string) => void;
@@ -374,14 +407,13 @@ function ChatPanel({
   return (
     <section className="dn-col dn-col-chat">
       <div className="dn-col-head">
-        <div className="dn-col-title">
-          Chat <span className="dn-col-count">{messages.filter((m) => m.role === "user").length}</span>
-        </div>
-        <div className="dn-chat-head-actions">
-          <button className="dn-btn dn-btn-ghost dn-btn-tight">
-            <IconRefresh size={12} /> New thread
-          </button>
-        </div>
+        <ThreadBar
+          threads={threads}
+          threadId={threadId}
+          busy={busy}
+          onSwitch={onSwitchThread}
+          onNew={onNewThread}
+        />
       </div>
 
       <div className="dn-chat-scroll" ref={scrollRef}>
@@ -494,6 +526,58 @@ function ChatPanel({
         </div>
       </div>
     </section>
+  );
+}
+
+function ThreadBar({
+  threads, threadId, busy, onSwitch, onNew,
+}: {
+  threads: Thread[];
+  threadId: string;
+  busy: boolean;
+  onSwitch: (tid: string) => void;
+  onNew: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = threads.find((t) => t.thread_id === threadId);
+  const label = current ? current.title : "New thread";
+  return (
+    <>
+      <div className="dn-threadbar">
+        <div className="dn-thread-select">
+          <button
+            className="dn-thread-current"
+            onClick={() => setOpen((v) => !v)}
+            title="Switch thread"
+          >
+            <IconNote size={13} />
+            <span className="dn-thread-current-label">{label}</span>
+            <span className={`dn-thread-caret ${open ? "is-open" : ""}`}><IconChevronRight size={12} /></span>
+          </button>
+          {open && (
+            <div className="dn-thread-menu">
+              {threads.length === 0 && (
+                <div className="dn-thread-empty">No threads yet</div>
+              )}
+              {threads.map((t) => (
+                <button
+                  key={t.thread_id}
+                  className={`dn-thread-item ${t.thread_id === threadId ? "is-active" : ""}`}
+                  onClick={() => { onSwitch(t.thread_id); setOpen(false); }}
+                >
+                  <span className="dn-thread-item-title">{t.title}</span>
+                  <span className="dn-thread-item-count">{t.message_count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <button className="dn-btn dn-btn-ghost dn-btn-tight" onClick={onNew} disabled={busy}>
+          <IconPlus size={12} /> New thread
+        </button>
+      </div>
+      {open && <div className="dn-thread-scrim" onClick={() => setOpen(false)} aria-hidden />}
+    </>
   );
 }
 

@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createNotebook, listNotebooks } from "@/lib/api";
 import type { Notebook } from "@/lib/types";
 import { TopBar } from "@/components/TopBar";
+import { NameModal } from "@/components/NameModal";
 
 export default function Dashboard() {
+  const router = useRouter();
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
-  const [creating, setCreating] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -26,17 +29,10 @@ export default function Dashboard() {
     refresh();
   }, [refresh]);
 
-  const onCreate = useCallback(async () => {
-    const title = window.prompt("Notebook title", "Untitled notebook");
-    if (title === null) return;
-    setCreating(true);
-    try {
-      await createNotebook(title.trim() || "Untitled notebook");
-      await refresh();
-    } finally {
-      setCreating(false);
-    }
-  }, [refresh]);
+  const onCreate = async (title: string) => {
+    const nb = await createNotebook(title.trim() || "Untitled notebook");
+    router.push(`/notebook/${nb.id}`); // open the new notebook
+  };
 
   return (
     <div className="dn-app">
@@ -57,8 +53,8 @@ export default function Dashboard() {
                       : `${notebooks.length} in progress`}
               </p>
             </div>
-            <button className="dn-btn dn-btn-primary" onClick={onCreate} disabled={creating || loadError}>
-              {creating ? "Creating…" : "+ New notebook"}
+            <button className="dn-btn dn-btn-primary" onClick={() => setShowCreate(true)} disabled={loadError}>
+              + New notebook
             </button>
           </div>
 
@@ -73,7 +69,7 @@ export default function Dashboard() {
           )}
 
           <div className="dn-grid">
-            <button className="dn-card dn-card-new" onClick={onCreate} disabled={creating}>
+            <button className="dn-card dn-card-new" onClick={() => setShowCreate(true)}>
               <div className="dn-card-new-mark">+</div>
               <div className="dn-card-new-label">New notebook</div>
               <div className="dn-card-new-sub">Start from sources or a blank canvas</div>
@@ -85,9 +81,21 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
+
+      {showCreate && (
+        <NameModal
+          title="New notebook"
+          label="Notebook title"
+          initial="Untitled notebook"
+          cta="Create"
+          onSubmit={onCreate}
+          onClose={() => setShowCreate(false)}
+        />
+      )}
     </div>
   );
 }
+
 
 function NotebookCard({ nb }: { nb: Notebook }) {
   const bg = `linear-gradient(135deg, oklch(0.82 0.06 ${nb.cover_hue_a}) 0%, oklch(0.72 0.09 ${nb.cover_hue_b}) 100%)`;

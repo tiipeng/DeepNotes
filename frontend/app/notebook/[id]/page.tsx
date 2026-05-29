@@ -269,7 +269,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
         <div className="dn-screen dn-notebook">
           <div className="dn-subhead">
             <div className="dn-crumbs">
-              <span className="dn-crumb-mute">Notebooks</span>
+              <a className="dn-crumb-mute dn-crumb-link" href="/">Notebooks</a>
               <IconChevronRight size={12} />
               <span className="dn-crumb">{notebook?.title ?? "…"}</span>
               <span className="dn-pill">{sources.length} sources</span>

@@ -12,7 +12,7 @@ from ..rag.assist import (
     follow_up_questions,
     meta_prompt,
 )
-from ..providers import get_provider
+from ..providers import get_chat_llm
 from ..rag.engine import _DISP_COMPLETE as _DISP
 from ..rag.engine import answer_question, stream_answer, stream_combined, stream_plain
 from ..schemas import (
@@ -88,6 +88,10 @@ def _consume(subgen) -> dict:
 def chat(notebook_id: str, payload: ChatRequest, db: Session = Depends(get_db)):
     """Non-streaming sibling of /chat/stream — same intent routing, collected up front."""
     nb = _get_notebook(db, notebook_id)
+    try:
+        get_chat_llm()  # clear error if the chosen chat model isn't configured
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     source_ids = _resolve_source_ids(nb, payload)
     intent = classify_intent(payload.question, bool(source_ids))
     db.add(Message(notebook_id=notebook_id, role="user", text=payload.question, thread_id=payload.thread_id))
@@ -101,7 +105,7 @@ def chat(notebook_id: str, payload: ChatRequest, db: Session = Depends(get_db)):
             if intent == "conversational"
             else meta_prompt(payload.question, nb.sources)
         )
-        text = get_provider().llm().complete(prompt).text.strip()
+        text = get_chat_llm().complete(prompt).text.strip()
         assistant = Message(notebook_id=notebook_id, role="assistant", text=text, thread_id=payload.thread_id)
         db.add(assistant)
         db.commit()
@@ -183,6 +187,11 @@ def chat_stream(notebook_id: str, payload: ChatRequest):
                 return
             if not payload.question.strip():
                 yield _sse({"type": "error", "detail": "Ask a question to get started."})
+                return
+            try:
+                get_chat_llm()  # fail fast with a clear message if the chat model isn't configured
+            except ValueError as e:
+                yield _sse({"type": "error", "detail": str(e)})
                 return
 
             source_ids = _resolve_source_ids(nb, payload)

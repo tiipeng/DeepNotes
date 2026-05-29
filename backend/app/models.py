@@ -141,6 +141,17 @@ class Note(Base):
     notebook: Mapped["Notebook"] = relationship(back_populates="notes")
 
 
+class AppSetting(Base):
+    """Single-row app settings — runtime overrides for the chat (generation) model so a
+    user can choose a provider/model and paste their own key from the UI without editing
+    .env. `data` is a JSON blob merged over the .env defaults."""
+
+    __tablename__ = "app_settings"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default="default")
+    data: Mapped[str] = mapped_column(Text, default="{}")
+
+
 class NotebookSummary(Base):
     """Cached notebook overview + suggested starter questions. Regenerated when the
     source set changes (tracked via `fingerprint`)."""

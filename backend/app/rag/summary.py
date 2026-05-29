@@ -9,7 +9,7 @@ import json
 import re
 
 from ..models import Source
-from ..providers import get_provider
+from ..providers import get_chat_llm
 
 _FENCE = re.compile(r"```(?:json)?|```", re.IGNORECASE)
 _MAX_SOURCES = 8
@@ -57,7 +57,7 @@ def generate_summary(sources: list[Source]) -> tuple[str, list[str]]:
         excerpts.append(f"=== {s.title} ({s.kind}) ===\n{_excerpt(s.parsed_markdown)}")
     context = "\n\n".join(excerpts)
 
-    raw = get_provider().llm().complete(_PROMPT.format(context=context)).text
+    raw = get_chat_llm().complete(_PROMPT.format(context=context)).text
     text = _FENCE.sub("", raw).strip()
     try:
         obj = json.loads(text)

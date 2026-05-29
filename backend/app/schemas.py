@@ -159,6 +159,31 @@ class NotebookSummaryRead(BaseModel):
     ready: bool  # whether the notebook has any ready sources to ground a summary
 
 
+class SettingsRead(BaseModel):
+    chat_provider: str
+    chat_model: str
+    openrouter_base_url: str
+    openai_compatible_base_url: str
+    ollama_base_url: str
+    # keys are never returned; only whether one is set
+    has_openrouter_key: bool
+    has_openai_compatible_key: bool
+    has_gemini_key: bool
+    embedding_provider: str  # pinned (governs the vector space) — informational
+    active_chat: str
+    providers: list[str] = ["gemini", "openrouter", "openai_compatible", "ollama"]
+
+
+class SettingsUpdate(BaseModel):
+    chat_provider: str | None = None
+    chat_model: str | None = None
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str | None = None
+    openai_compatible_base_url: str | None = None
+    openai_compatible_api_key: str | None = None
+    ollama_base_url: str | None = None
+
+
 class HealthRead(BaseModel):
     status: str
     provider: str

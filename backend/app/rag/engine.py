@@ -169,19 +169,33 @@ def _build_citations(db: Session, answer: str, source_nodes) -> list[dict]:
     return out
 
 
-def _renumber(answer: str, citations: list[dict]) -> tuple[str, list[dict]]:
-    """Remap the engine's internal citation numbers (e.g. [7][29][112]) to clean
-    sequential [1][2][3] in order of first appearance, in both the answer text and
-    the citation records."""
+_BRACKET = re.compile(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]")
+
+
+def _finalize_citations(answer: str, valid: dict[int, dict]) -> tuple[str, list[dict]]:
+    """Strip source-internal reference markers (e.g. the document's own '[64, 139]' or a
+    '[38]' that maps to no retrieved chunk) so only real DeepNotes citations render as
+    chips, then renumber the survivors to clean sequential [1][2][3]. `valid` maps the
+    model's original [n] -> resolved citation dict."""
+    # 1. remove any bracket token that isn't a single, resolvable citation index
+    def _strip(m: re.Match) -> str:
+        body = m.group(0).strip("[] ")
+        if "," in body:
+            return ""  # comma-form is always a source-internal reference
+        return m.group(0) if int(body) in valid else ""
+
+    cleaned = _BRACKET.sub(_strip, answer)
+    # 2. renumber the surviving markers in order of first appearance
     order: list[int] = []
-    for m in _CITE_RE.finditer(answer):
+    for m in _CITE_RE.finditer(cleaned):
         n = int(m.group(1))
-        if n not in order:
+        if n in valid and n not in order:
             order.append(n)
     remap = {old: i + 1 for i, old in enumerate(order)}
-    new_answer = _CITE_RE.sub(lambda m: f"[{remap.get(int(m.group(1)), m.group(1))}]", answer)
-    for c in citations:
-        c["display_index"] = remap.get(c["display_index"], c["display_index"])
+    new_answer = _CITE_RE.sub(lambda m: f"[{remap[int(m.group(1))]}]" if int(m.group(1)) in remap else "", cleaned)
+    new_answer = re.sub(r"\s+([.,;:)])", r"\1", new_answer)
+    new_answer = re.sub(r"[ \t]{2,}", " ", new_answer).strip()
+    citations = [{**valid[old], "display_index": i} for old, i in remap.items()]
     citations.sort(key=lambda c: c["display_index"])
     return new_answer, citations
 
@@ -323,15 +337,16 @@ def stream_answer(db: Session, source_ids: list[str], question: str, mode: str =
     grounded = NOT_FOUND.lower() not in answer.lower()
     citations: list[dict] = []
     if grounded:
+        valid: dict[int, dict] = {}
         for n in sorted({int(m) for m in _CITE_RE.findall(answer)}):
             if n - 1 < len(chunks):
                 c = _citation_from_chunk(db, n, chunks[n - 1])
                 if c:
-                    citations.append(c)
-        if not citations:
+                    valid[n] = c
+        if not valid:
             grounded = False
         else:
-            answer, citations = _renumber(answer, citations)
+            answer, citations = _finalize_citations(answer, valid)
     yield ("done", {"answer": answer, "grounded": grounded, "citations": citations})
 
 
@@ -366,16 +381,17 @@ def stream_combined(db: Session, rag_source_ids: list[str], question: str, table
     # Combined path never hard-refuses (it always has the computed figure); citations are
     # resolved where present, answer prose is always kept.
     answer = raw.strip()
-    citations: list[dict] = []
+    valid: dict[int, dict] = {}
     for n in sorted({int(m) for m in _CITE_RE.findall(answer)}):
         if n == 1 and table_cite:
-            citations.append({**table_cite, "display_index": 1})
+            valid[1] = dict(table_cite)
         elif n >= 2 and (n - 2) < len(rag_chunks):
             c = _citation_from_chunk(db, n, rag_chunks[n - 2])
             if c:
-                citations.append(c)
-    if citations:
-        answer, citations = _renumber(answer, citations)
+                valid[n] = c
+    citations: list[dict] = []
+    if valid:
+        answer, citations = _finalize_citations(answer, valid)
     yield ("done", {"answer": answer, "grounded": bool(citations), "citations": citations})
 
 
@@ -387,10 +403,12 @@ def answer_question(db: Session, source_ids: list[str], question: str) -> dict:
     resp = engine.query(question)
     answer = str(resp).strip()
     grounded = NOT_FOUND.lower() not in answer.lower()
-    citations = _build_citations(db, answer, resp.source_nodes) if grounded else []
-    # An answer with no resolvable citations isn't truly grounded.
-    if grounded and not citations:
-        grounded = False
+    citations: list[dict] = []
     if grounded:
-        answer, citations = _renumber(answer, citations)
+        built = _build_citations(db, answer, resp.source_nodes)
+        valid = {c["display_index"]: c for c in built}
+        if not valid:
+            grounded = False
+        else:
+            answer, citations = _finalize_citations(answer, valid)
     return {"answer": answer, "grounded": grounded, "citations": citations}

@@ -298,6 +298,14 @@ body {
 .dn-cited-card { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); text-align: left; transition: border-color 0.15s, background 0.15s; cursor: pointer; }
 .dn-cited-card:hover { border-color: var(--border-3); background: var(--surface-2); }
 .dn-cited-card.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.dn-cited-card.is-deleted { opacity: 0.55; cursor: default; }
+.dn-cited-card.is-deleted .dn-cited-n { background: var(--faint); }
+.dn-cited-card.is-deleted:hover { border-color: var(--border); background: var(--bg); }
+/* Inert citation chip (source was deleted) */
+.dn-cite-dead { background: var(--bg-2); color: var(--muted-2); cursor: default; border-color: var(--border); }
+.dn-cite-dead:hover { transform: none; background: var(--bg-2); }
+.dn-cd-esc-hint { font-size: 11px; color: var(--muted); }
+.dn-cd-esc-hint .dn-mono { background: var(--bg-2); border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; }
 .dn-cited-n { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; background: var(--accent); color: #fff; font-family: var(--font-mono); font-size: 11px; font-weight: 600; flex-shrink: 0; }
 .dn-cited-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dn-cited-title { font-size: 12.5px; line-height: 1.35; color: var(--ink); font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

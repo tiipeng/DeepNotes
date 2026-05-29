@@ -32,6 +32,9 @@ const stripMarkers = (s: string) => s.replace(/\s*\[\d+\]/g, "");
 // The exact strict-grounding refusal (mirrors backend NOT_FOUND); used to style a
 // genuine "not found" differently from a normal conversational/meta reply.
 const NOT_FOUND = "I couldn't find an answer to that in your sources.";
+// Backend marks a citation whose source was deleted with this title.
+const DELETED_SOURCE = "(deleted source)";
+const isDeletedCite = (c: Citation) => c.source_title === DELETED_SOURCE;
 import { TopBar } from "@/components/TopBar";
 import {
   IconAttach,
@@ -249,6 +252,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   };
 
   const onCite = async (c: Citation) => {
+    if (isDeletedCite(c)) return; // source removed — citation is inert
     setOpenCite(c);
     setPassage(null);
     try {
@@ -777,15 +781,17 @@ function AssistantMessage({
             {m.citations.map((c) => (
               <button
                 key={c.display_index}
-                className={`dn-cited-card ${openCite?.display_index === c.display_index ? "is-active" : ""}`}
+                className={`dn-cited-card ${openCite?.display_index === c.display_index ? "is-active" : ""} ${isDeletedCite(c) ? "is-deleted" : ""}`}
                 onClick={() => onCite(c)}
+                disabled={isDeletedCite(c)}
               >
                 <span className="dn-cited-n">{c.display_index}</span>
                 <span className="dn-cited-body">
                   <span className="dn-cited-title">{c.source_title}</span>
                   <span className="dn-cited-meta">
-                    {c.section ?? c.source_venue ?? c.source_kind.toUpperCase()}
-                    {c.page ? ` · p. ${c.page}` : ""}
+                    {isDeletedCite(c)
+                      ? "source removed"
+                      : `${c.section ?? c.source_venue ?? c.source_kind.toUpperCase()}${c.page ? ` · p. ${c.page}` : ""}`}
                   </span>
                 </span>
               </button>
@@ -824,6 +830,15 @@ function renderAnswer(
       const n = Number(m[1]);
       const c = byId.get(n);
       if (c) {
+        if (isDeletedCite(c)) {
+          return (
+            <span key={i} className="dn-cite dn-cite-dead" title="Source removed from this notebook">
+              <span className="dn-cite-bracket">⟦</span>
+              <span className="dn-cite-n">{n}</span>
+              <span className="dn-cite-bracket">⟧</span>
+            </span>
+          );
+        }
         return (
           <button
             key={i}
@@ -958,6 +973,16 @@ function CitationDrawer({
     }
   }, [cite, passage]);
 
+  // Esc closes the drawer.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   return (
     <>
       <div className={`dn-cd-scrim ${open ? "is-open" : ""}`} onClick={onClose} aria-hidden={!open} />
@@ -1004,7 +1029,7 @@ function CitationDrawer({
                 <span>{cite.section ?? passage?.section ?? "Cited passage"}</span>
               </div>
               <div className="dn-cd-tools">
-                <button className="dn-chip-sm">Open original</button>
+                <span className="dn-cd-esc-hint"><span className="dn-mono">Esc</span> to close</span>
               </div>
             </div>
 

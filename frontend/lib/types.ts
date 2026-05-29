@@ -22,6 +22,7 @@ export interface Source {
   year: number | null;
   pages: number | null;
   status: string;
+  error_msg: string | null;
   checked: boolean;
   char_count: number;
   created_at: string;

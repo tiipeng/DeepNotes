@@ -8,12 +8,17 @@ import { TopBar } from "@/components/TopBar";
 export default function Dashboard() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
   const [creating, setCreating] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       setNotebooks(await listNotebooks());
+      setLoadError(false);
     } catch {
-      /* backend may be starting */
+      setLoadError(true);
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -43,15 +48,29 @@ export default function Dashboard() {
             <div>
               <h1 className="dn-display">Your notebooks</h1>
               <p className="dn-subtle">
-                {notebooks.length === 0
-                  ? "No notebooks yet"
-                  : `${notebooks.length} in progress`}
+                {loadError
+                  ? "Can't reach the backend"
+                  : !loaded
+                    ? "Loading…"
+                    : notebooks.length === 0
+                      ? "No notebooks yet"
+                      : `${notebooks.length} in progress`}
               </p>
             </div>
-            <button className="dn-btn dn-btn-primary" onClick={onCreate} disabled={creating}>
+            <button className="dn-btn dn-btn-primary" onClick={onCreate} disabled={creating || loadError}>
               {creating ? "Creating…" : "+ New notebook"}
             </button>
           </div>
+
+          {loadError && (
+            <div className="dn-banner" role="alert">
+              <span className="dn-banner-dot" />
+              <span>
+                Can&apos;t reach the DeepNotes backend. Make sure it&apos;s running, then{" "}
+                <button className="dn-banner-link" onClick={refresh}>retry</button>.
+              </span>
+            </div>
+          )}
 
           <div className="dn-grid">
             <button className="dn-card dn-card-new" onClick={onCreate} disabled={creating}>

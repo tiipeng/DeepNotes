@@ -109,7 +109,8 @@ async def add_source(
         source.status = "error"
         source.error_msg = str(e)[:500]
         db.commit()
-        raise HTTPException(500, f"Ingestion failed: {e}")
+        # Readable message for the client; the raw cause is kept in error_msg.
+        raise HTTPException(422, "Couldn't read this file — it may be corrupted, password-protected, or empty.")
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)  # discard original — keep only parsed markdown + vectors

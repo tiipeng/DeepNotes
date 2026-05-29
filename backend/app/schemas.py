@@ -31,6 +31,7 @@ class SourceRead(BaseModel):
     year: int | None = None
     pages: int | None = None
     status: str
+    error_msg: str | None = None
     checked: bool
     char_count: int
     created_at: datetime

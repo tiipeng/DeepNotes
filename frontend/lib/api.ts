@@ -46,11 +46,25 @@ export const setSourceChecked = (sourceId: string, checked: boolean) =>
 export async function uploadSource(notebookId: string, file: File): Promise<Source> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(`${API_BASE}/notebooks/${notebookId}/sources`, {
-    method: "POST",
-    body: fd, // let the browser set multipart boundary
-  });
-  if (!res.ok) throw new Error(`Upload failed: ${res.status} ${await res.text()}`);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/notebooks/${notebookId}/sources`, {
+      method: "POST",
+      body: fd, // let the browser set multipart boundary
+    });
+  } catch {
+    throw new Error("Can't reach the backend. Check your connection and try again.");
+  }
+  if (!res.ok) {
+    let detail = `Upload failed (${res.status}).`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail);
+  }
   return res.json();
 }
 

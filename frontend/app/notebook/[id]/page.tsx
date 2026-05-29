@@ -91,6 +91,14 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
     getMessages(notebookId, threadId).then(setMessages).catch(() => setMessages([]));
   }, [notebookId, threadId]);
 
+  // While anything is still parsing, poll until it resolves (ready or error).
+  const anyParsing = sources.some((s) => s.status === "parsing" && !s.id.startsWith("tmp-"));
+  useEffect(() => {
+    if (!anyParsing) return;
+    const t = window.setInterval(() => loadSources().catch(() => {}), 3000);
+    return () => window.clearInterval(t);
+  }, [anyParsing, loadSources]);
+
   const newThread = () => {
     if (streaming !== null) return;
     setChatError(null);
@@ -167,16 +175,21 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   };
 
   const onUpload = async (file: File) => {
+    const tmpId = `tmp-${Date.now()}`;
     const tmp: Source = {
-      id: `tmp-${Date.now()}`, notebook_id: notebookId, kind: "pdf",
+      id: tmpId, notebook_id: notebookId, kind: "pdf",
       title: file.name, authors: null, venue: null, year: null, pages: null,
-      status: "parsing", checked: true, char_count: 0, created_at: new Date().toISOString(),
+      status: "parsing", error_msg: null, checked: true, char_count: 0,
+      created_at: new Date().toISOString(),
     };
     setSources((prev) => [...prev, tmp]);
     try {
       await uploadSource(notebookId, file);
-    } finally {
       await loadSources();
+    } catch (e) {
+      setSources((prev) => prev.filter((s) => s.id !== tmpId));
+      await loadSources(); // a failed parse may still leave an error row
+      flash(e instanceof Error ? e.message : "Upload failed");
     }
   };
 
@@ -340,8 +353,14 @@ function SourcesPanel({
               <span className="dn-source-body">
                 <span className="dn-source-title">{s.title}</span>
                 <span className="dn-source-meta">
-                  {s.status !== "ready" ? (
-                    <span className={`dn-source-status is-${s.status}`}>{s.status}</span>
+                  {s.status === "parsing" ? (
+                    <span className="dn-source-status is-parsing">
+                      <span className="dn-spin" aria-hidden /> processing…
+                    </span>
+                  ) : s.status === "error" ? (
+                    <span className="dn-source-status is-error" title={s.error_msg ?? undefined}>
+                      couldn&apos;t process
+                    </span>
                   ) : (
                     <>
                       {s.pages ? <span className="dn-mono">{s.pages}p</span> : null}
@@ -350,6 +369,9 @@ function SourcesPanel({
                     </>
                   )}
                 </span>
+                {s.status === "error" && s.error_msg && (
+                  <span className="dn-source-errmsg">{s.error_msg}</span>
+                )}
               </span>
             </button>
           </li>

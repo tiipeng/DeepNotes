@@ -28,13 +28,25 @@ _QA_TEMPLATE = PromptTemplate(
     "You are answering strictly from the provided sources, each labeled 'Source N:'.\n"
     "Rules:\n"
     "- Use ONLY information in these sources. Do not use outside knowledge.\n"
-    "- Cite every claim with the matching source number(s) in square brackets, e.g. [1] "
-    "or [1][2], placed immediately after the claim.\n"
+    "- Cite sparingly, the way a careful writer does: place a [n] after a KEY claim or at "
+    "the end of a sentence — not after every clause. At most one citation per sentence, and "
+    "only the single most relevant source. Do not stack multiple numbers unless truly needed.\n"
     "- If the sources do not contain the answer, reply with exactly this sentence and "
     f"nothing else: {NOT_FOUND}\n\n"
     "Sources:\n{context_str}\n\n"
     "Question: {query_str}\n"
     "Answer: "
+)
+
+_SYNTH_TEMPLATE = PromptTemplate(
+    "You are synthesizing an overview from the user's sources, each labeled 'Source N:'.\n"
+    "Write a clear, well-structured synthesis that addresses the request using ONLY these "
+    "sources. Cover the main points across them; do not use outside knowledge. Cite key "
+    "claims with a single [n] at the end of the sentence — sparingly, the most relevant "
+    "source only.\n\n"
+    "Sources:\n{context_str}\n\n"
+    "Request: {query_str}\n"
+    "Overview: "
 )
 
 _REFINE_TEMPLATE = PromptTemplate(
@@ -186,6 +198,18 @@ def _strip_for_display(buf: str) -> tuple[str, str]:
     return buf, ""
 
 
+def stream_plain(prompt: str):
+    """Stream a plain LLM reply (no retrieval, no citations) — for conversational/meta
+    intents. Yields ('token', delta) then ('done', {...}) like stream_answer."""
+    raw = ""
+    for resp in get_provider().llm().stream_complete(prompt):
+        delta = resp.delta or ""
+        if delta:
+            raw += delta
+            yield ("token", delta)
+    yield ("done", {"answer": raw.strip(), "grounded": False, "citations": []})
+
+
 def _retrieve_citation_chunks(source_ids: list[str], question: str, top_k: int = 8) -> list[dict]:
     provider = get_provider()
     Settings.llm = provider.llm()
@@ -245,23 +269,29 @@ def _citation_from_chunk(db: Session, n: int, chunk: dict) -> dict | None:
     }
 
 
-def stream_answer(db: Session, source_ids: list[str], question: str):
+def stream_answer(db: Session, source_ids: list[str], question: str, mode: str = "factual"):
     """Generator yielding ('token', delta) as prose streams, then ('done', result)
     where result = {answer, grounded, citations}. Display tokens have [n] markers
-    stripped; citations are resolved from the full answer once it completes."""
+    stripped; citations are resolved from the full answer once it completes.
+
+    mode='factual' = strict pinpoint RAG (may refuse with NOT_FOUND).
+    mode='synthesis' = broad retrieval + overview template (never refuses)."""
+    synthesis = mode == "synthesis"
     if not source_ids:
         yield ("token", NOT_FOUND)
         yield ("done", {"answer": NOT_FOUND, "grounded": False, "citations": []})
         return
 
-    chunks = _retrieve_citation_chunks(source_ids, question)
+    top_k = 20 if synthesis else 8
+    chunks = _retrieve_citation_chunks(source_ids, question, top_k=top_k)
     if not chunks:
         yield ("token", NOT_FOUND)
         yield ("done", {"answer": NOT_FOUND, "grounded": False, "citations": []})
         return
 
     context = "\n\n".join(f"Source {i + 1}:\n{c['text']}" for i, c in enumerate(chunks))
-    prompt = _QA_TEMPLATE.format(context_str=context, query_str=question)
+    template = _SYNTH_TEMPLATE if synthesis else _QA_TEMPLATE
+    prompt = template.format(context_str=context, query_str=question)
 
     raw = ""
     hold = ""

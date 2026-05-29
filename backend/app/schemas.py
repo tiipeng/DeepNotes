@@ -114,6 +114,8 @@ class ChatResponse(BaseModel):
     grounded: bool
     citations: list[CitationOut]
     table_result: TableResult | None = None
+    intent: str = "factual"
+    follow_ups: list[str] = []
 
 
 class ThreadRead(BaseModel):

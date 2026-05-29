@@ -6,8 +6,15 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, get_db
 from ..models import Citation, Message, Notebook, Source
+from ..rag.assist import (
+    classify_intent,
+    conversational_prompt,
+    follow_up_questions,
+    meta_prompt,
+)
+from ..providers import get_provider
 from ..rag.engine import _DISP_COMPLETE as _DISP
-from ..rag.engine import answer_question, stream_answer
+from ..rag.engine import answer_question, stream_answer, stream_plain
 from ..schemas import (
     ChatRequest,
     ChatResponse,
@@ -69,48 +76,77 @@ def _citation_out(c: Citation, db: Session) -> CitationOut:
     )
 
 
+def _consume(subgen) -> dict:
+    final = None
+    for kind, data in subgen:
+        if kind != "token":
+            final = data
+    return final or {"answer": "", "grounded": False, "citations": []}
+
+
 @router.post("/notebooks/{notebook_id}/chat", response_model=ChatResponse)
 def chat(notebook_id: str, payload: ChatRequest, db: Session = Depends(get_db)):
+    """Non-streaming sibling of /chat/stream — same intent routing, collected up front."""
     nb = _get_notebook(db, notebook_id)
     source_ids = _resolve_source_ids(nb, payload)
-
-    # Spreadsheet reasoning first: if in-scope sources have XLSX tables and the
-    # question is answerable via SQL, compute it. Otherwise fall back to grounded RAG.
-    table = answer_with_tables(db, notebook_id, payload.question, source_ids)
-
+    intent = classify_intent(payload.question, bool(source_ids))
     db.add(Message(notebook_id=notebook_id, role="user", text=payload.question, thread_id=payload.thread_id))
 
-    if table:
-        table_out = TableResult(
-            source_title=table["source_title"], sql=table["sql"],
-            columns=table["columns"], rows=table["rows"], truncated=table["truncated"],
+    follow = lambda ans: follow_up_questions(nb.sources, payload.question, ans)  # noqa: E731
+
+    # conversational / meta — plain helpful reply, no retrieval, no refusal
+    if intent in ("conversational", "meta"):
+        prompt = (
+            conversational_prompt(payload.question, nb.sources)
+            if intent == "conversational"
+            else meta_prompt(payload.question, nb.sources)
         )
-        assistant = Message(
-            notebook_id=notebook_id, role="assistant", text=table["answer"],
-            table_json=table_out.model_dump_json(), thread_id=payload.thread_id,
-        )
+        text = get_provider().llm().complete(prompt).text.strip()
+        assistant = Message(notebook_id=notebook_id, role="assistant", text=text, thread_id=payload.thread_id)
         db.add(assistant)
-        db.flush()
-        _persist_citations(db, assistant.id, table["citations"])
         db.commit()
         return ChatResponse(
-            message_id=assistant.id, answer_markdown=table["answer"],
-            grounded=True, citations=[CitationOut(**c) for c in table["citations"]],
-            table_result=table_out,
+            message_id=assistant.id, answer_markdown=text, grounded=False,
+            citations=[], intent=intent, follow_ups=follow(text),
         )
 
-    result = answer_question(db, source_ids, payload.question)
+    # factual — spreadsheet reasoning first
+    if intent == "factual":
+        table = answer_with_tables(db, notebook_id, payload.question, source_ids)
+        if table:
+            table_out = TableResult(
+                source_title=table["source_title"], sql=table["sql"],
+                columns=table["columns"], rows=table["rows"], truncated=table["truncated"],
+            )
+            assistant = Message(
+                notebook_id=notebook_id, role="assistant", text=table["answer"],
+                table_json=table_out.model_dump_json(), thread_id=payload.thread_id,
+            )
+            db.add(assistant)
+            db.flush()
+            _persist_citations(db, assistant.id, table["citations"])
+            db.commit()
+            return ChatResponse(
+                message_id=assistant.id, answer_markdown=table["answer"], grounded=True,
+                citations=[CitationOut(**c) for c in table["citations"]],
+                table_result=table_out, intent="factual", follow_ups=follow(table["answer"]),
+            )
+        result = answer_question(db, source_ids, payload.question)
+    else:  # synthesis
+        result = _consume(stream_answer(db, source_ids, payload.question, "synthesis"))
+
     assistant = Message(notebook_id=notebook_id, role="assistant", text=result["answer"], thread_id=payload.thread_id)
     db.add(assistant)
     db.flush()
     _persist_citations(db, assistant.id, result["citations"])
     db.commit()
-
     return ChatResponse(
         message_id=assistant.id,
         answer_markdown=result["answer"],
         grounded=result["grounded"],
         citations=[CitationOut(**c) for c in result["citations"]],
+        intent=intent,
+        follow_ups=follow(result["answer"]),
     )
 
 
@@ -144,34 +180,71 @@ def chat_stream(notebook_id: str, payload: ChatRequest):
             db.add(Message(notebook_id=notebook_id, role="user", text=payload.question, thread_id=payload.thread_id))
             db.commit()
 
-            # Spreadsheet path (computed up front, then streamed for a consistent feel).
-            table = answer_with_tables(db, notebook_id, payload.question, source_ids)
-            if table:
-                display = _DISP.sub("", table["answer"]).strip()
-                for w in _word_chunks(display):
-                    yield _sse({"type": "token", "delta": w})
-                table_out = TableResult(
-                    source_title=table["source_title"], sql=table["sql"],
-                    columns=table["columns"], rows=table["rows"], truncated=table["truncated"],
+            # Route by intent. Only the 'factual' path uses strict grounded RAG and may
+            # refuse with NOT_FOUND; meta/conversational/synthesis never show the refusal.
+            intent = classify_intent(payload.question, bool(source_ids))
+
+            def _suggest(answer: str) -> list[str]:
+                return follow_up_questions(nb.sources, payload.question, answer)
+
+            # --- conversational / meta: plain helpful reply, no retrieval, no refusal ---
+            if intent in ("conversational", "meta"):
+                prompt = (
+                    conversational_prompt(payload.question, nb.sources)
+                    if intent == "conversational"
+                    else meta_prompt(payload.question, nb.sources)
                 )
+                final = None
+                for kind, data in stream_plain(prompt):
+                    if kind == "token":
+                        yield _sse({"type": "token", "delta": data})
+                    else:
+                        final = data
                 assistant = Message(
-                    notebook_id=notebook_id, role="assistant", text=table["answer"],
-                    table_json=table_out.model_dump_json(), thread_id=payload.thread_id,
+                    notebook_id=notebook_id, role="assistant", text=final["answer"],
+                    thread_id=payload.thread_id,
                 )
                 db.add(assistant)
-                db.flush()
-                _persist_citations(db, assistant.id, table["citations"])
                 db.commit()
                 yield _sse({
                     "type": "done", "message_id": assistant.id,
-                    "answer_markdown": table["answer"], "grounded": True,
-                    "citations": table["citations"], "table_result": table_out.model_dump(),
+                    "answer_markdown": final["answer"], "grounded": False,
+                    "citations": [], "table_result": None, "intent": intent,
+                    "follow_ups": _suggest(final["answer"]),
                 })
                 return
 
-            # Grounded RAG streaming path.
+            # --- factual: spreadsheet reasoning first, then strict grounded RAG ---
+            if intent == "factual":
+                table = answer_with_tables(db, notebook_id, payload.question, source_ids)
+                if table:
+                    display = _DISP.sub("", table["answer"]).strip()
+                    for w in _word_chunks(display):
+                        yield _sse({"type": "token", "delta": w})
+                    table_out = TableResult(
+                        source_title=table["source_title"], sql=table["sql"],
+                        columns=table["columns"], rows=table["rows"], truncated=table["truncated"],
+                    )
+                    assistant = Message(
+                        notebook_id=notebook_id, role="assistant", text=table["answer"],
+                        table_json=table_out.model_dump_json(), thread_id=payload.thread_id,
+                    )
+                    db.add(assistant)
+                    db.flush()
+                    _persist_citations(db, assistant.id, table["citations"])
+                    db.commit()
+                    yield _sse({
+                        "type": "done", "message_id": assistant.id,
+                        "answer_markdown": table["answer"], "grounded": True,
+                        "citations": table["citations"], "table_result": table_out.model_dump(),
+                        "intent": "factual", "follow_ups": _suggest(table["answer"]),
+                    })
+                    return
+
+            # factual (no table) or synthesis -> streamed RAG
+            mode = "synthesis" if intent == "synthesis" else "factual"
             final = None
-            for kind, data in stream_answer(db, source_ids, payload.question):
+            for kind, data in stream_answer(db, source_ids, payload.question, mode):
                 if kind == "token":
                     yield _sse({"type": "token", "delta": data})
                 else:
@@ -186,7 +259,8 @@ def chat_stream(notebook_id: str, payload: ChatRequest):
             yield _sse({
                 "type": "done", "message_id": assistant.id,
                 "answer_markdown": final["answer"], "grounded": final["grounded"],
-                "citations": final["citations"], "table_result": None,
+                "citations": final["citations"], "table_result": None, "intent": intent,
+                "follow_ups": _suggest(final["answer"]),
             })
         except Exception:
             db.rollback()

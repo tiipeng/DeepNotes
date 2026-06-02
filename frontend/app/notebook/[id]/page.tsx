@@ -23,6 +23,7 @@ import {
 import { NameModal } from "@/components/NameModal";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { Markdown } from "@/components/Markdown";
+import { SourceDrawer } from "@/components/SourceDrawer";
 import type {
   Citation,
   Message,
@@ -83,6 +84,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const [toast, setToast] = useState<string | null>(null);
   const [threadId, setThreadId] = useState("default");
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [guideSource, setGuideSource] = useState<Source | null>(null);
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -287,8 +289,15 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
     });
   };
 
+  const onOpenGuide = (s: Source) => {
+    setGuideSource(s);
+    setOpenCite(null); // close citation drawer so they don't overlap
+    setPassage(null);
+  };
+
   const onCite = async (c: Citation) => {
     if (isDeletedCite(c)) return; // source removed — citation is inert
+    setGuideSource(null); // close source guide drawer
     setOpenCite(c);
     setPassage(null);
     try {
@@ -343,6 +352,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               onUpload={onUpload}
               onAddUrl={onAddUrl}
               onRequestDelete={setSourceToDelete}
+              onOpenGuide={onOpenGuide}
             />
             <ChatPanel
               messages={messages}
@@ -375,6 +385,11 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
           setOpenCite(null);
           setPassage(null);
         }}
+      />
+      <SourceDrawer
+        source={guideSource}
+        onClose={() => setGuideSource(null)}
+        onAsk={ask}
       />
 
       {toast && <div className="dn-toast" role="status">{toast}</div>}
@@ -422,7 +437,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
 
 /* ---------------- Sources ---------------- */
 function SourcesPanel({
-  sources, checkedCount, onToggle, onUpload, onAddUrl, onRequestDelete,
+  sources, checkedCount, onToggle, onUpload, onAddUrl, onRequestDelete, onOpenGuide,
 }: {
   sources: Source[];
   checkedCount: number;
@@ -430,6 +445,7 @@ function SourcesPanel({
   onUpload: (files: File[]) => void;
   onAddUrl: (url: string) => void;
   onRequestDelete: (s: Source) => void;
+  onOpenGuide: (s: Source) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [showLink, setShowLink] = useState(false);
@@ -499,10 +515,18 @@ function SourcesPanel({
         )}
         {sources.map((s) => (
           <li key={s.id} className="dn-source-row">
-            <button className="dn-source" onClick={() => onToggle(s)}>
+            {/* Left: checkbox toggles include-in-chat */}
+            <button
+              className="dn-source-cb-btn"
+              title={s.checked ? "Exclude from chat" : "Include in chat"}
+              onClick={() => onToggle(s)}
+            >
               <span className={`dn-cb ${s.checked ? "is-checked" : ""}`}>
                 {s.checked && <IconCheck size={11} />}
               </span>
+            </button>
+            {/* Middle: icon + title — opens Source Guide */}
+            <button className="dn-source" onClick={() => onOpenGuide(s)}>
               <span className="dn-source-icon">
                 {s.kind === "url" ? <IconLink size={14} /> : <IconFileText size={14} />}
                 <span className="dn-source-kind">{s.kind.toUpperCase()}</span>

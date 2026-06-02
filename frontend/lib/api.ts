@@ -10,6 +10,8 @@ import type {
   Passage,
   SearchHit,
   Source,
+  SourceContent,
+  SourceGuide,
   TableResult,
   Thread,
 } from "./types";
@@ -58,6 +60,10 @@ export const listSources = (notebookId: string) =>
   req<Source[]>(`/notebooks/${notebookId}/sources`);
 export const deleteSource = (sourceId: string) =>
   req<void>(`/sources/${sourceId}`, { method: "DELETE" });
+export const getSourceGuide = (sourceId: string) =>
+  req<SourceGuide>(`/sources/${sourceId}/guide`);
+export const getSourceContent = (sourceId: string) =>
+  req<SourceContent>(`/sources/${sourceId}/content`);
 export const setSourceChecked = (sourceId: string, checked: boolean) =>
   req<Source>(`/sources/${sourceId}`, {
     method: "PATCH",

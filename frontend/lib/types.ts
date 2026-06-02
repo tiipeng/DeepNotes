@@ -98,6 +98,21 @@ export interface Note {
   created_at: string;
 }
 
+export interface SourceGuide {
+  summary: string;
+  questions: string[];
+  ready: boolean;
+}
+
+export interface SourceContent {
+  id: string;
+  title: string;
+  kind: string;
+  pages: number | null;
+  parsed_markdown: string;
+  sections: string[];
+}
+
 export interface NotebookOverview {
   summary: string;
   suggested_questions: string[];

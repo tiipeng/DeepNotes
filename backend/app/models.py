@@ -63,6 +63,7 @@ class Source(Base):
     # JSON [[start, end, page], ...] mapping char offsets -> page, so any citation's
     # page is resolved from its exact offset (accurate regardless of chunk size).
     page_map: Mapped[str] = mapped_column(Text, default="[]")
+    guide_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # cached SourceGuide JSON
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     notebook: Mapped["Notebook"] = relationship(back_populates="sources")

@@ -18,7 +18,7 @@ from ..ingest.parse import (
 )
 from ..ingest.pipeline import ingest_source
 from ..models import Chunk, Notebook, Source
-from ..schemas import PassageRead, SourceContent, SourcePatch, SourceRead
+from ..schemas import PassageRead, SourceContent, SourceGuideRead, SourcePatch, SourceRead
 from ..spreadsheet.store import drop_tables, ingest_tables, parse_xlsx
 from ..stores.chroma import delete_source as chroma_delete_source
 
@@ -179,6 +179,36 @@ def patch_source(source_id: str, payload: SourcePatch, db: Session = Depends(get
         db.commit()
         db.refresh(s)
     return SourceRead.model_validate(s)
+
+
+@router.get("/sources/{source_id}/guide", response_model=SourceGuideRead)
+def source_guide(source_id: str, db: Session = Depends(get_db)):
+    """Return a cached per-source guide (summary + 5 questions). Generated on first
+    call, then stored in source.guide_json so subsequent calls are instant."""
+    import json as _json
+
+    from ..rag.source_guide import generate_source_guide
+
+    s = _get_source(db, source_id)
+    if s.status != "ready":
+        return SourceGuideRead(summary="", questions=[], ready=False)
+
+    if s.guide_json:
+        try:
+            obj = _json.loads(s.guide_json)
+            return SourceGuideRead(
+                summary=obj.get("summary", ""),
+                questions=obj.get("questions", []),
+                ready=True,
+            )
+        except Exception:
+            pass  # corrupted cache — regenerate
+
+    summary, questions = generate_source_guide(s)
+    if summary:
+        s.guide_json = _json.dumps({"summary": summary, "questions": questions})
+        db.commit()
+    return SourceGuideRead(summary=summary, questions=questions, ready=True)
 
 
 @router.delete("/sources/{source_id}", status_code=204)

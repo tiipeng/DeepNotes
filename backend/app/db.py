@@ -24,7 +24,23 @@ def get_db():
         db.close()
 
 
+def _migrate() -> None:
+    """Add columns introduced after initial schema. Idempotent — safe to re-run."""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        for stmt in [
+            "ALTER TABLE sources ADD COLUMN guide_json TEXT",
+        ]:
+            try:
+                conn.execute(text(stmt))
+            except Exception:
+                pass  # column already exists
+        conn.commit()
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  (register mappers before create_all)
 
     Base.metadata.create_all(bind=engine)
+    _migrate()

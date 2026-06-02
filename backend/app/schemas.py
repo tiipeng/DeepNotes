@@ -153,6 +153,12 @@ class NoteRead(BaseModel):
     created_at: datetime
 
 
+class SourceGuideRead(BaseModel):
+    summary: str
+    questions: list[str]
+    ready: bool
+
+
 class NotebookSummaryRead(BaseModel):
     summary: str
     suggested_questions: list[str] = []

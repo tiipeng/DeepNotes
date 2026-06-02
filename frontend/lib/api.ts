@@ -56,6 +56,8 @@ export const updateNotebook = (id: string, patch: { title?: string; snippet?: st
 
 export const listSources = (notebookId: string) =>
   req<Source[]>(`/notebooks/${notebookId}/sources`);
+export const deleteSource = (sourceId: string) =>
+  req<void>(`/sources/${sourceId}`, { method: "DELETE" });
 export const setSourceChecked = (sourceId: string, checked: boolean) =>
   req<Source>(`/sources/${sourceId}`, {
     method: "PATCH",

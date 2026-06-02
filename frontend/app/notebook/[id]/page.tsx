@@ -7,6 +7,7 @@ import {
   createNote,
   deleteNote,
   deleteNotebook,
+  deleteSource,
   getMessages,
   getNotebook,
   getNotebookSummary,
@@ -68,6 +69,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showRename, setShowRename] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [sourceToDelete, setSourceToDelete] = useState<Source | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState<string | null>(null);
@@ -202,6 +204,17 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
     await setSourceChecked(s.id, !s.checked).catch(loadSources);
   };
 
+  const onDeleteSource = async (s: Source) => {
+    setSources((prev) => prev.filter((x) => x.id !== s.id)); // optimistic
+    setSourceToDelete(null);
+    try {
+      await deleteSource(s.id);
+    } catch {
+      flash("Couldn't remove source");
+    }
+    await loadSources(); // reconcile (also re-triggers the overview when ready count changes)
+  };
+
   const onUpload = async (files: File[]) => {
     // Each upload returns immediately (parsing happens on the background worker), so we
     // can submit them serially and let the poll flip each parsing -> ready.
@@ -329,6 +342,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               onToggle={onToggle}
               onUpload={onUpload}
               onAddUrl={onAddUrl}
+              onRequestDelete={setSourceToDelete}
             />
             <ChatPanel
               messages={messages}
@@ -392,19 +406,30 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
           onClose={() => setShowDelete(false)}
         />
       )}
+      {sourceToDelete && (
+        <ConfirmModal
+          title="Remove source?"
+          body={`Remove “${sourceToDelete.title}” from this notebook? Its text and embeddings are deleted, and any past answers that cited it will show “(deleted source)”.`}
+          cta="Remove"
+          danger
+          onConfirm={() => onDeleteSource(sourceToDelete)}
+          onClose={() => setSourceToDelete(null)}
+        />
+      )}
     </div>
   );
 }
 
 /* ---------------- Sources ---------------- */
 function SourcesPanel({
-  sources, checkedCount, onToggle, onUpload, onAddUrl,
+  sources, checkedCount, onToggle, onUpload, onAddUrl, onRequestDelete,
 }: {
   sources: Source[];
   checkedCount: number;
   onToggle: (s: Source) => void;
   onUpload: (files: File[]) => void;
   onAddUrl: (url: string) => void;
+  onRequestDelete: (s: Source) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [showLink, setShowLink] = useState(false);
@@ -473,7 +498,7 @@ function SourcesPanel({
           </li>
         )}
         {sources.map((s) => (
-          <li key={s.id}>
+          <li key={s.id} className="dn-source-row">
             <button className="dn-source" onClick={() => onToggle(s)}>
               <span className={`dn-cb ${s.checked ? "is-checked" : ""}`}>
                 {s.checked && <IconCheck size={11} />}
@@ -505,6 +530,14 @@ function SourcesPanel({
                   <span className="dn-source-errmsg">{s.error_msg}</span>
                 )}
               </span>
+            </button>
+            <button
+              className="dn-source-del"
+              title="Remove source"
+              aria-label={`Remove ${s.title}`}
+              onClick={() => onRequestDelete(s)}
+            >
+              <IconClose size={12} />
             </button>
           </li>
         ))}

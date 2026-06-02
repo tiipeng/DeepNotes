@@ -180,29 +180,8 @@ def _fmt_ts(seconds: float) -> str:
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
 
 
-def parse_youtube(url: str) -> ParsedDoc:
-    """Pull a YouTube transcript and ingest it as a normal source. Transcript is
-    grouped into ~30s blocks each headed by its timestamp, so citations point into
-    the transcript at a time offset."""
-    from youtube_transcript_api import YouTubeTranscriptApi
-
-    vid = _youtube_id(url)
-    if not vid:
-        raise ValueError("Not a valid YouTube URL.")
-    try:
-        fetched = YouTubeTranscriptApi().fetch(vid)
-    except Exception:
-        raise ValueError("No transcript available for this video (captions may be disabled).")
-
-    segs = [
-        (float(getattr(s, "start", 0.0)), str(getattr(s, "text", "")).strip())
-        for s in fetched
-    ]
-    segs = [s for s in segs if s[1]]
-    if not segs:
-        raise ValueError("This video's transcript is empty.")
-
-    title = _youtube_title(url) or f"YouTube video {vid}"
+def _build_yt_md(title: str, segs: list[tuple[float, str]]) -> str:
+    """Format timestamped caption segments into our markdown block structure."""
     parts = [f"## {title}\n\n"]
     block: list[str] = []
     block_start = segs[0][0]
@@ -214,8 +193,67 @@ def parse_youtube(url: str) -> ParsedDoc:
         block.append(text)
     if block:
         parts.append(f"## [{_fmt_ts(block_start)}]\n\n{' '.join(block)}\n\n")
+    return "".join(parts)
 
-    return parse_markdown_sections("".join(parts), title=title)
+
+def _gemini_transcribe_video(url: str, title: str) -> str:
+    """Use Gemini's native video understanding to transcribe when captions are unavailable."""
+    from google import genai
+    from google.genai import types
+
+    from ..config import get_settings
+    from ..runtime import gemini_key
+
+    s = get_settings()
+    key = gemini_key() or s.gemini_api_key
+    if not key:
+        raise ValueError("No Gemini API key configured — can't transcribe this video without captions.")
+
+    client = genai.Client(api_key=key)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[
+            types.Part(file_data=types.FileData(file_uri=url)),
+            types.Part(text=(
+                "Transcribe this entire video. Group speech into ~30-second blocks. "
+                "Start each block with a markdown heading: ## [MM:SS] then the spoken text. "
+                "Include all spoken words. If the video has no speech, describe what is shown."
+            )),
+        ],
+    )
+    text = (response.text or "").strip()
+    if not text:
+        raise ValueError("Gemini returned no content for this video.")
+    return f"## {title}\n\n{text}"
+
+
+def parse_youtube(url: str) -> ParsedDoc:
+    """Pull a YouTube transcript and ingest it as a normal source. Tries captions first;
+    falls back to Gemini's native video understanding when captions are disabled."""
+    from youtube_transcript_api import YouTubeTranscriptApi
+
+    vid = _youtube_id(url)
+    if not vid:
+        raise ValueError("Not a valid YouTube URL.")
+
+    title = _youtube_title(url) or f"YouTube video {vid}"
+
+    # Fast path: use existing captions when available
+    try:
+        fetched = YouTubeTranscriptApi().fetch(vid)
+        segs = [
+            (float(getattr(s, "start", 0.0)), str(getattr(s, "text", "")).strip())
+            for s in fetched
+        ]
+        segs = [s for s in segs if s[1]]
+        if segs:
+            return parse_markdown_sections(_build_yt_md(title, segs), title=title)
+    except Exception:
+        pass  # no captions — fall through to Gemini
+
+    # Fallback: Gemini native video understanding (works without captions)
+    md = _gemini_transcribe_video(url, title)
+    return parse_markdown_sections(md, title=title)
 
 
 @lru_cache(maxsize=1)

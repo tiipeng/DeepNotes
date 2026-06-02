@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+*.db
+chroma*/
+tables*.duckdb
+*.pdf
+*.xlsx
+.env
+README.md

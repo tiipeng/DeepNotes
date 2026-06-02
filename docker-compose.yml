@@ -1,0 +1,33 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8100:8100"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Data paths inside the named volume
+      DATABASE_URL: "sqlite:////data/deepnotes.db"
+      CHROMA_DIR: "/data/chroma"
+      TABLES_PATH: "/data/tables.duckdb"
+      # Allow requests from any origin (single-user self-hosted app)
+      CORS_ORIGINS: "*"
+    volumes:
+      # Persistent notebooks/sources/vectors — survives container restarts
+      - deepnotes-data:/data
+      # ML model cache (docling, faster-whisper) — avoids re-downloading on restart
+      - model-cache:/root/.cache
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3100:3100"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  deepnotes-data:
+  model-cache:

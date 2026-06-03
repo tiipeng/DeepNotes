@@ -336,6 +336,16 @@ def list_threads(notebook_id: str, db: Session = Depends(get_db)):
     return threads
 
 
+@router.delete("/notebooks/{notebook_id}/threads/{thread_id}", status_code=204)
+def delete_thread(notebook_id: str, thread_id: str, db: Session = Depends(get_db)):
+    """Delete a whole conversation thread — all its messages (citations cascade)."""
+    nb = _get_notebook(db, notebook_id)
+    for m in list(nb.messages):
+        if (m.thread_id or "default") == thread_id:
+            db.delete(m)
+    db.commit()
+
+
 @router.get("/notebooks/{notebook_id}/messages", response_model=list[MessageRead])
 def list_messages(notebook_id: str, thread_id: str | None = None, db: Session = Depends(get_db)):
     nb = _get_notebook(db, notebook_id)

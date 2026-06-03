@@ -31,6 +31,9 @@ def _migrate() -> None:
     with engine.connect() as conn:
         for stmt in [
             "ALTER TABLE sources ADD COLUMN guide_json TEXT",
+            # Speeds up per-thread message loading (thread switching) and thread listing.
+            "CREATE INDEX IF NOT EXISTS ix_messages_notebook_thread "
+            "ON messages (notebook_id, thread_id, created_at)",
         ]:
             try:
                 conn.execute(text(stmt))

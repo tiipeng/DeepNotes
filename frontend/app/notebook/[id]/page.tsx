@@ -8,6 +8,7 @@ import {
   deleteNote,
   deleteNotebook,
   deleteSource,
+  deleteThread,
   getMessages,
   getNotebook,
   getNotebookSummary,
@@ -84,7 +85,11 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
   const [toast, setToast] = useState<string | null>(null);
   const [threadId, setThreadId] = useState("default");
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [threadToDelete, setThreadToDelete] = useState<Thread | null>(null);
   const [guideSource, setGuideSource] = useState<Source | null>(null);
+  // Per-thread message cache so revisiting a thread renders instantly while a
+  // background refetch reconciles it (keyed by thread_id within this notebook).
+  const msgCache = useRef<Map<string, Message[]>>(new Map());
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -108,9 +113,23 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
     loadThreads().catch(() => {});
   }, [notebookId, loadSources, loadNotes, loadThreads]);
 
-  // Load the active thread's messages whenever the thread changes.
+  // Load the active thread's messages whenever the thread changes. Show any cached copy
+  // immediately (instant switch), then refetch in the background. An AbortController makes
+  // rapid switching cancel the previous in-flight request instead of letting them race.
   useEffect(() => {
-    getMessages(notebookId, threadId).then(setMessages).catch(() => setMessages([]));
+    const cached = msgCache.current.get(threadId);
+    if (cached) setMessages(cached);
+    const ac = new AbortController();
+    getMessages(notebookId, threadId, ac.signal)
+      .then((msgs) => {
+        msgCache.current.set(threadId, msgs);
+        setMessages(msgs);
+      })
+      .catch((e) => {
+        if ((e as { name?: string })?.name === "AbortError") return; // superseded switch
+        if (!cached) setMessages([]);
+      });
+    return () => ac.abort();
   }, [notebookId, threadId]);
 
   // While anything is still parsing, poll until it resolves (ready or error).
@@ -136,6 +155,31 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
     setChatError(null);
     setFollowUps([]);
     setThreadId(tid);
+  };
+  const onDeleteThread = async (t: Thread) => {
+    setThreadToDelete(null);
+    const remaining = threads.filter((x) => x.thread_id !== t.thread_id);
+    setThreads(remaining); // optimistic
+    msgCache.current.delete(t.thread_id);
+    try {
+      await deleteThread(notebookId, t.thread_id);
+    } catch {
+      flash("Couldn't delete thread");
+      loadThreads().catch(() => {});
+      return;
+    }
+    // If we deleted the open thread, jump to the next most-recent one (or a fresh thread).
+    if (t.thread_id === threadId) {
+      setChatError(null);
+      setFollowUps([]);
+      if (remaining[0]) {
+        setThreadId(remaining[0].thread_id);
+      } else {
+        setMessages([]);
+        setThreadId("default");
+      }
+    }
+    loadThreads().catch(() => {});
   };
 
   const saveNote = useCallback(
@@ -366,6 +410,7 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
               threadId={threadId}
               onNewThread={newThread}
               onSwitchThread={switchThread}
+              onRequestDeleteThread={setThreadToDelete}
               openCite={openCite}
               onCite={onCite}
               onAsk={ask}
@@ -429,6 +474,16 @@ export default function NotebookPage({ params }: { params: { id: string } }) {
           danger
           onConfirm={() => onDeleteSource(sourceToDelete)}
           onClose={() => setSourceToDelete(null)}
+        />
+      )}
+      {threadToDelete && (
+        <ConfirmModal
+          title="Delete thread?"
+          body={`Delete “${threadToDelete.title}”? Its messages are permanently removed. This can't be undone.`}
+          cta="Delete"
+          danger
+          onConfirm={() => onDeleteThread(threadToDelete)}
+          onClose={() => setThreadToDelete(null)}
         />
       )}
     </div>
@@ -583,7 +638,7 @@ function SourcesPanel({
 /* ---------------- Chat ---------------- */
 function ChatPanel({
   messages, streaming, chatError, sourceCount, overview, overviewLoading,
-  threads, threadId, onNewThread, onSwitchThread, openCite, onCite, onAsk, onSaveNote, followUps, onUpload,
+  threads, threadId, onNewThread, onSwitchThread, onRequestDeleteThread, openCite, onCite, onAsk, onSaveNote, followUps, onUpload,
 }: {
   messages: Message[];
   streaming: string | null;
@@ -596,6 +651,7 @@ function ChatPanel({
   threadId: string;
   onNewThread: () => void;
   onSwitchThread: (tid: string) => void;
+  onRequestDeleteThread: (t: Thread) => void;
   openCite: Citation | null;
   onCite: (c: Citation) => void;
   onAsk: (q: string) => void;
@@ -627,6 +683,7 @@ function ChatPanel({
           busy={busy}
           onSwitch={onSwitchThread}
           onNew={onNewThread}
+          onRequestDelete={onRequestDeleteThread}
         />
       </div>
 
@@ -761,13 +818,14 @@ function ChatPanel({
 }
 
 function ThreadBar({
-  threads, threadId, busy, onSwitch, onNew,
+  threads, threadId, busy, onSwitch, onNew, onRequestDelete,
 }: {
   threads: Thread[];
   threadId: string;
   busy: boolean;
   onSwitch: (tid: string) => void;
   onNew: () => void;
+  onRequestDelete: (t: Thread) => void;
 }) {
   const [open, setOpen] = useState(false);
   const current = threads.find((t) => t.thread_id === threadId);
@@ -792,14 +850,27 @@ function ThreadBar({
                 <div className="dn-thread-empty">No threads yet</div>
               )}
               {threads.map((t) => (
-                <button
+                <div
                   key={t.thread_id}
                   className={`dn-thread-item ${t.thread_id === threadId ? "is-active" : ""}`}
-                  onClick={() => { onSwitch(t.thread_id); setOpen(false); }}
                 >
-                  <span className="dn-thread-item-title">{t.title}</span>
-                  <span className="dn-thread-item-count">{t.message_count}</span>
-                </button>
+                  <button
+                    className="dn-thread-item-main"
+                    onClick={() => { onSwitch(t.thread_id); setOpen(false); }}
+                  >
+                    <span className="dn-thread-item-title">{t.title}</span>
+                    <span className="dn-thread-item-count">{t.message_count}</span>
+                  </button>
+                  <button
+                    className="dn-thread-item-del"
+                    title="Delete thread"
+                    aria-label={`Delete thread ${t.title}`}
+                    disabled={busy}
+                    onClick={() => { onRequestDelete(t); setOpen(false); }}
+                  >
+                    <IconClose size={11} />
+                  </button>
+                </div>
               ))}
             </div>
           )}

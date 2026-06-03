@@ -45,16 +45,20 @@ Get a free Gemini API key at https://aistudio.google.com/apikey.
 
 ## 5 — Open firewall ports
 
-Allow ports 3100 (frontend) and 8100 (backend API) through your firewall:
+Caddy serves the whole app over HTTPS, so you only need the standard web ports —
+80 (HTTP, used for the Let's Encrypt challenge and a redirect to HTTPS) and 443 (HTTPS):
 
 ```bash
 # Ubuntu ufw
-sudo ufw allow 3100/tcp
-sudo ufw allow 8100/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow OpenSSH       # keep SSH open
 sudo ufw enable
 ```
 
-If your provider has a cloud-level firewall panel (DigitalOcean, Hetzner), also open those same two ports there.
+If your provider has a cloud-level firewall panel (DigitalOcean, Hetzner), open the same
+two ports there. Ports 3100/8100 are **not** exposed publicly any more — Caddy reaches the
+frontend and backend over Docker's internal network.
 
 ## 6 — Build and start
 
@@ -71,15 +75,25 @@ Watch logs:
 docker compose logs -f
 ```
 
-## 7 — Access the app
+## 7 — Access the app (HTTPS)
 
-Open your browser and go to:
+The app is served over HTTPS by Caddy, which provisions a real, browser-trusted
+certificate automatically. Open:
 
 ```
-http://YOUR_SERVER_IP:3100
+https://2.24.160.117.sslip.io
 ```
 
-The frontend will automatically connect to the backend at `:8100` on the same host.
+`sslip.io` is a free wildcard-DNS service: `2.24.160.117.sslip.io` resolves to the IP
+embedded in it (`2.24.160.117`) with no DNS setup. The first load may take a few seconds
+while Caddy obtains the certificate.
+
+**Using your own domain instead:** point an `A` record at the server's IP, then edit the
+first line of `Caddyfile` (replace `2.24.160.117.sslip.io` with your domain) and run
+`docker compose up -d`. Caddy will issue a certificate for it automatically.
+
+The frontend talks to the backend same-origin via `/api` (Caddy routes `/api/*` to the
+backend), so there is nothing else to configure.
 
 ## Updating
 

@@ -29,11 +29,19 @@ export const API_BASE =
       : `http://localhost:${BACKEND_PORT}`;
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-    ...init,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      ...init,
+    });
+  } catch (e) {
+    // A deliberately-aborted request (e.g. switching threads fast) must propagate as-is
+    // so callers can ignore it — only real network failures become a friendly message.
+    if ((e as { name?: string })?.name === "AbortError") throw e;
+    throw new Error("Can't reach the backend. Check your connection and try again.");
+  }
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} on ${path}`);
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -97,6 +105,10 @@ export async function uploadSource(notebookId: string, file: File): Promise<Sour
 
 export const listThreads = (notebookId: string) =>
   req<Thread[]>(`/notebooks/${notebookId}/threads`);
+export const deleteThread = (notebookId: string, threadId: string) =>
+  req<void>(`/notebooks/${notebookId}/threads/${encodeURIComponent(threadId)}`, {
+    method: "DELETE",
+  });
 export async function addUrlSource(notebookId: string, url: string): Promise<Source> {
   const fd = new FormData();
   fd.append("url", url);
@@ -119,9 +131,10 @@ export async function addUrlSource(notebookId: string, url: string): Promise<Sou
   return res.json();
 }
 
-export const getMessages = (notebookId: string, threadId?: string) =>
+export const getMessages = (notebookId: string, threadId?: string, signal?: AbortSignal) =>
   req<Message[]>(
     `/notebooks/${notebookId}/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`,
+    { signal },
   );
 export const sendChat = (notebookId: string, question: string, threadId = "default") =>
   req<ChatResponse>(`/notebooks/${notebookId}/chat`, {

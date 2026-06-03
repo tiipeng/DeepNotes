@@ -1,8 +1,23 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
   backend:
     build: ./backend
-    ports:
-      - "8100:8100"
+    # No public port: only Caddy reaches the backend over the internal network.
+    expose:
+      - "8100"
     env_file:
       - path: .env
         required: false
@@ -21,9 +36,15 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
-    ports:
-      - "3100:3100"
+    build:
+      context: ./frontend
+      args:
+        # Call the backend same-origin via Caddy (/api → backend), so it works over HTTPS
+        # with no hardcoded host/port and no mixed-content.
+        NEXT_PUBLIC_API_URL: /api
+    # No public port: only Caddy reaches the frontend over the internal network.
+    expose:
+      - "3100"
     depends_on:
       - backend
     restart: unless-stopped
@@ -31,3 +52,5 @@ services:
 volumes:
   deepnotes-data:
   model-cache:
+  caddy-data:
+  caddy-config:

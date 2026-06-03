@@ -1,0 +1,21 @@
+# Caddy reverse proxy — automatic HTTPS via Let's Encrypt.
+#
+# The site address below is a free sslip.io hostname that resolves to the VPS IP
+# (2.24.160.117) with no DNS setup. Caddy provisions and renews a real, browser-trusted
+# certificate for it automatically. To use your own domain instead, replace this line
+# with your domain and point an A record at the server.
+2.24.160.117.sslip.io {
+	encode gzip
+
+	# Browser → /api/* is proxied to the backend with the /api prefix stripped,
+	# so /api/health reaches the backend as /health. Same-origin, so no CORS and
+	# no mixed-content (everything is served over the one HTTPS origin).
+	handle_path /api/* {
+		reverse_proxy backend:8100
+	}
+
+	# Everything else is the Next.js frontend.
+	handle {
+		reverse_proxy frontend:3100
+	}
+}

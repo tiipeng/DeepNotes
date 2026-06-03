@@ -25,9 +25,15 @@ export function TopBar() {
   const [open, setOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  const loadHealth = () => getHealth().then(setHealth).catch(() => setErr(true));
+  const loadHealth = () =>
+    getHealth()
+      .then((h) => { setHealth(h); setErr(false); }) // clear a stale "offline" once it recovers
+      .catch(() => setErr(true));
+  // Poll periodically so a single transient blip doesn't latch the badge to "offline".
   useEffect(() => {
     loadHealth();
+    const t = window.setInterval(loadHealth, 20000);
+    return () => window.clearInterval(t);
   }, []);
 
   useEffect(() => {
